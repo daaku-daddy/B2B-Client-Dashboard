@@ -163,7 +163,7 @@ export function ProjectsView({
             <Field label="Site address"><Textarea name="site_address" rows={2} /></Field>
             <div className="grid grid-cols-3 gap-3">
               <Field label="Carpet area" hint="sqft"><Input name="carpet_area_sqft" inputMode="decimal" /></Field>
-              <Field label="Budget" hint="₹"><Input name="budget" inputMode="decimal" /></Field>
+              <Field label="Budget" hint="₹, whole project"><Input name="budget" inputMode="decimal" /></Field>
               <Field label="Your fee" hint="₹"><Input name="design_fee" inputMode="decimal" /></Field>
             </div>
             <Field label="Target handover"><Input name="target_on" type="date" /></Field>

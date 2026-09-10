@@ -165,7 +165,7 @@ export function OverviewTab(
           {project.budget && liveTotals ? (
             <div className="border-t border-line px-4 py-3">
               <div className="mb-1.5 flex justify-between text-xs">
-                <span className="text-ink-soft">Quoted against budget</span>
+                <span className="text-ink-soft">Material Depot supply vs project budget</span>
                 <span className={cn('tnum font-medium', liveTotals.clientTotal > project.budget ? 'text-bad' : 'text-good')}>
                   {inrShort(liveTotals.clientTotal)} of {inrShort(project.budget)}
                 </span>

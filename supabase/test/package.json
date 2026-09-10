@@ -1,0 +1,17 @@
+{
+  "name": "b2b-dashboard-sql-test",
+  "private": true,
+  "description": "Runs the migrations, the seed and an RLS isolation suite against a throwaway Postgres. Kept out of the app's package.json so nobody downloads Postgres binaries to build the site.",
+  "scripts": {
+    "pg:start": "node pg.js start",
+    "pg:stop": "node pg.js stop",
+    "migrate": "node run.js shim.sql ../migrations/001_init.sql ../migrations/002_rls.sql",
+    "seed": "node run.js user.sql ../seed/001_demo.sql",
+    "rls": "node rlstest.js",
+    "all": "npm run pg:start && npm run migrate && npm run seed && npm run rls"
+  },
+  "dependencies": {
+    "embedded-postgres": "^18.4.0-beta.17",
+    "pg": "^8.16.3"
+  }
+}

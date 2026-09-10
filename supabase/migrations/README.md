@@ -9,8 +9,14 @@ apply a change to it.
 
 | File | What it does | Applied |
 |---|---|---|
-| `001_init.sql` | Tables, indexes, the six reward tiers, `updated_at` triggers | ☐ |
-| `002_rls.sql` | RLS on every table, ownership helper functions, `onboard_partner()` | ☐ |
+| `001_init.sql` | Tables, indexes, the six reward tiers, `updated_at` triggers | ☑ 2026-09-11 |
+| `002_rls.sql` | RLS on every table, ownership helper functions, `onboard_partner()` | ☑ 2026-09-11 |
+| `../seed/001_demo.sql` | Demo data — a firm, 4 clients, 5 projects, boards, quotes, procurement, ledger, referrals, rewards | ☐ |
+
+Both migrations, and the seed, are tested against a real Postgres by
+`supabase/test` — `cd supabase/test && npm install && npm run all`. That suite
+is also what asserts one architect cannot read another's rows, so run it before
+changing any policy.
 
 Tick the box in this table when you have run it, and say so in the commit. A
 migration committed here is **not** evidence it was applied — if a column is
