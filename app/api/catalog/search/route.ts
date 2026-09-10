@@ -82,11 +82,14 @@ export async function POST(req: Request) {
       // Say which wall we hit. "Catalogue unreachable" with no reason is the
       // kind of message that gets reported as "search is broken" and costs a
       // day of guessing.
+      // Cloudflare is the OUTER wall and the one hit in practice from a
+      // serverless function, so it is checked first — the string is how a
+      // reader tells which of the two walls they are at.
       const reason =
-        /csrf/i.test(text)
-          ? 'The catalogue API rejected this server (Django CSRF / untrusted origin). This Vercel domain needs adding to the API allowlist.'
-          : /cloudflare|just a moment/i.test(text)
-            ? 'Cloudflare blocked the request before it reached the catalogue API.'
+        /cloudflare|just a moment|attention required/i.test(text)
+          ? 'Cloudflare blocked the request before it reached the catalogue API.'
+          : /csrf/i.test(text)
+            ? 'The catalogue API rejected this server (Django CSRF / untrusted origin). This Vercel domain needs adding to the API allowlist.'
             : `Catalogue API returned ${res.status}.`
       return NextResponse.json({ error: reason, code: 'catalogue_unreachable' }, { status: 502 })
     }

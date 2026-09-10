@@ -45,10 +45,26 @@ from palette's own bundle.
 
 ## It does not work yet, and that is not a code bug
 
-The API rejects this app's server with a Django CSRF / untrusted-origin 403.
-From a laptop, Cloudflare blocks it even earlier. **`b2b-client-dashboard-eight.vercel.app`
-needs adding to the API's `CSRF_TRUSTED_ORIGINS` / CORS allowlist** — a change on
-the Django side.
+There are **two walls, and Cloudflare is the outer one.** Verified from the live
+Vercel deployment on 2026-09-11 — not inferred from a laptop:
+
+| Where the request comes from | What stops it |
+|---|---|
+| A browser on `materialdepot.com` | Django: `403`, CSRF / untrusted origin |
+| This laptop via curl | Cloudflare, before Django sees it |
+| **The live Vercel function** | **Cloudflare**, before Django sees it |
+
+So the first ask is **not** a Django change. `api.materialdepot.com` sits behind
+Cloudflare bot protection that rejects datacentre egress, which is what every
+Vercel function is. Whoever owns that Cloudflare zone has to let this
+deployment through — an allowlisted egress IP, a WAF skip rule for the API
+hostname, or a shared header the rule trusts.
+
+**Then** the Django wall is still there, and
+`b2b-client-dashboard-eight.vercel.app` will need adding to
+`CSRF_TRUSTED_ORIGINS` / the CORS allowlist. Expect to fix both, in that order,
+and to see the 502's `error` string change from the Cloudflare message to the
+CSRF one in between — that string is how you tell which wall you are at.
 
 Until then the route returns `{ code: 'catalogue_unreachable', error: <which
 wall we hit> }` with a 502, and `ProductPicker` says so on screen and offers

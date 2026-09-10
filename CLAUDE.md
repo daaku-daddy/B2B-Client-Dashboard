@@ -32,7 +32,7 @@ the three Material Depot Supabase projects this one is.
 | `proxy.ts` | Session refresh + the signed-out redirect. Next 16's `proxy` convention, not the deprecated `middleware`. |
 | `app/(app)/**` | Every signed-in page. `layout.tsx` resolves the partner and gates onboarding. |
 | `app/login` | Email + password. Phone-OTP is the intended production login — see `docs/auth.md`. |
-| `app/api/catalog/search` | Server proxy to Material Depot's catalogue. **Blocked today** — `docs/catalogue.md`. |
+| `app/api/catalog/search` | Server proxy to Material Depot's catalogue. **Blocked today by Cloudflare, with Django CSRF behind it** — `docs/catalogue.md`. |
 | `app/api/sync/referrals` | Push endpoint for referral events and orders. Service-role, shared-secret. |
 | `lib/domain/**` | The rules: money, quantity, areas, rewards, project stages. No I/O in here. |
 | `lib/data/**` | Reads (`queries.ts`), writes (`actions.ts`), the `Result` type, the session. |

@@ -19,9 +19,11 @@ enough that changing it is expensive.
 
 ## Known gaps, named rather than faked
 
-- **The catalogue is unreachable** from this deployment until the Vercel domain
-  is allowlisted on the Django API. The product picker says so and offers manual
-  entry. `docs/catalogue.md`.
+- **The catalogue is unreachable** from this deployment. Verified live: the
+  outer wall is Cloudflare bot protection on `api.materialdepot.com` rejecting
+  datacentre egress, with Django's CSRF check behind it. Two owners, two fixes,
+  in that order — `docs/catalogue.md`. The product picker says which wall it hit
+  and offers manual entry.
 - **Referral data has no producer yet.** `/api/sync/referrals` is the contract
   and it works; nothing is pushing to it. Until something does, the referral
   timeline is empty and says so.
