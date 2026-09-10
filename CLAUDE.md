@@ -97,3 +97,18 @@ Module detail lives in `docs/`, read on demand:
 **When you change behaviour a doc describes, update that doc in the same
 commit.** A doc describing last month's behaviour is worse than no doc, because
 the next session will trust it.
+
+## Deploying
+
+Vercel project `material-depot1/b2b-client-dashboard`, built from `main` on
+push. `vercel.json` pins `"framework": "nextjs"` **on purpose**: the project was
+originally created with a static preset and every build failed with *No Output
+Directory named "public" found* even though `next build` had just succeeded.
+Keeping the framework in the repo means a new deployment cannot inherit that
+setting again.
+
+Environment variables live in the Vercel project, not here. Production and
+Development carry the two `NEXT_PUBLIC_SUPABASE_*` values; `SUPABASE_SERVICE_ROLE_KEY`
+and `SYNC_SHARED_SECRET` are **not set**, so `/api/sync/referrals` returns 503
+until they are. That is the intended behaviour — it says which variable is
+missing rather than failing silently.
