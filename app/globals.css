@@ -1,0 +1,67 @@
+@import 'tailwindcss';
+
+/*
+ * Material Depot's own palette, taken off palette.materialdepot.com: warm
+ * off-white ground, terracotta accent, ink that is brown-black rather than
+ * grey-black. Light theme only, on purpose — no OS dark auto-switch.
+ */
+@theme {
+  --color-ground: #faf7f2;
+  --color-surface: #ffffff;
+  --color-raised: #fdfbf7;
+  --color-line: #e9e1d6;
+  --color-line-strong: #d8cdbd;
+
+  --color-ink: #201b16;
+  --color-ink-soft: #5b5147;
+  --color-ink-faint: #8d8477;
+
+  --color-brand: #c4581c;
+  --color-brand-hover: #a94714;
+  --color-brand-soft: #fbeee6;
+  --color-brand-line: #f0d5c4;
+
+  --color-good: #2f7a4f;
+  --color-good-soft: #e8f4ec;
+  --color-warn: #a5720f;
+  --color-warn-soft: #fbf1dd;
+  --color-bad: #b3341f;
+  --color-bad-soft: #fbeae7;
+  --color-info: #2b5e93;
+  --color-info-soft: #e9f0f8;
+
+  --color-silver: #8f9298;
+  --color-gold: #b08320;
+
+  --font-sans: 'Onest', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Outfit', var(--font-sans);
+
+  --radius-card: 14px;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-ground);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular figures everywhere money or quantities are shown, so columns line up
+   and a changing number does not make the row jump. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: var(--color-brand-soft);
+}
+
+/* A thin, warm scrollbar rather than the default grey slab. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
