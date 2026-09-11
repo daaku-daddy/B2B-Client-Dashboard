@@ -187,40 +187,53 @@ export function QuoteTab(props: WorkspaceProps) {
           </div>
         ) : null}
 
+        {/* An accepted quote is a record of what the client agreed to, so it is
+            read-only — the LINES were already locked, and leaving the markup
+            and discount editable beside them meant the total could still be
+            changed after the fact. Rebuild for a new version instead. */}
         {quote ? (
-          <div className="grid gap-3 border-b border-line bg-raised px-4 py-3 sm:grid-cols-3">
-            <Field label="Your markup %" hint="Applied on top of Material Depot's rate, on every line without its own">
-              <Input
-                defaultValue={quote.markup_pct}
-                inputMode="decimal"
-                onBlur={(e) => {
-                  const n = Number(e.target.value) || 0
-                  if (n !== quote.markup_pct) patchQuote({ markup_pct: n })
-                }}
-                className="tnum"
-              />
-            </Field>
-            <Field label="Discount ₹" hint="Off the client total">
-              <Input
-                defaultValue={quote.discount}
-                inputMode="decimal"
-                onBlur={(e) => {
-                  const n = Number(e.target.value) || 0
-                  if (n !== quote.discount) patchQuote({ discount: n })
-                }}
-                className="tnum"
-              />
-            </Field>
-            <Field label="Valid until">
-              <Input
-                type="date"
-                defaultValue={quote.valid_until ?? ''}
-                onBlur={(e) => {
-                  if (e.target.value !== (quote.valid_until ?? '')) patchQuote({ valid_until: e.target.value || null })
-                }}
-              />
-            </Field>
-          </div>
+          quote.status === 'accepted' ? (
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-line bg-raised px-4 py-3 text-xs">
+              <span className="text-ink-soft">Markup <strong className="tnum text-ink">{pct(quote.markup_pct)}</strong></span>
+              <span className="text-ink-soft">Discount <strong className="tnum text-ink">{inr(quote.discount)}</strong></span>
+              <span className="text-ink-soft">Valid until <strong className="text-ink">{date(quote.valid_until)}</strong></span>
+              <span className="text-ink-faint">Accepted quotes cannot be edited — rebuild to make a new version.</span>
+            </div>
+          ) : (
+            <div className="grid gap-3 border-b border-line bg-raised px-4 py-3 sm:grid-cols-3">
+              <Field label="Your markup %" hint="Applied on top of Material Depot's rate, on every line without its own">
+                <Input
+                  defaultValue={quote.markup_pct}
+                  inputMode="decimal"
+                  onBlur={(e) => {
+                    const n = Number(e.target.value) || 0
+                    if (n !== quote.markup_pct) patchQuote({ markup_pct: n })
+                  }}
+                  className="tnum"
+                />
+              </Field>
+              <Field label="Discount ₹" hint="Off the client total">
+                <Input
+                  defaultValue={quote.discount}
+                  inputMode="decimal"
+                  onBlur={(e) => {
+                    const n = Number(e.target.value) || 0
+                    if (n !== quote.discount) patchQuote({ discount: n })
+                  }}
+                  className="tnum"
+                />
+              </Field>
+              <Field label="Valid until">
+                <Input
+                  type="date"
+                  defaultValue={quote.valid_until ?? ''}
+                  onBlur={(e) => {
+                    if (e.target.value !== (quote.valid_until ?? '')) patchQuote({ valid_until: e.target.value || null })
+                  }}
+                />
+              </Field>
+            </div>
+          )
         ) : null}
 
         {!lines.length ? (

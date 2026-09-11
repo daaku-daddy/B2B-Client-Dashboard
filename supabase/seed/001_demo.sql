@@ -145,58 +145,66 @@ on conflict (id) do update set
 -- picks one. Exactly one board per FINALISED room is 'approved' — that is what
 -- the quote gets built from.
 --
--- Cover and texture images are real, publicly-served Material Depot CDN assets
--- (the same ones palette.materialdepot.com serves), so nothing here 404s.
+-- Covers are real, publicly-served Material Depot scene photographs, the same
+-- ones palette.materialdepot.com shows in its gallery.
+--
+-- They are `/cdn-img/azure/application_image/<scene>-medres.jpg`, NOT
+-- `/cdn-img/main/general-images/<uuid>.png`. The uuid ones are the scene's
+-- compositing LAYERS — they fetch 200 and are near-transparent, so they render
+-- as blank white boxes. That is what the first version of this file used.
+-- Product rows carry no image for the same reason: palette draws its swatches
+-- to a canvas, so there is no per-product URL to point at, and a neutral
+-- placeholder beats a blank one.
 insert into board (id, area_id, name, palette_scene, cover_url, status, approved_at, notes) values
   -- Living Room: three options, client picked the second
   ('44444444-4444-4444-8444-444444440101', '33333333-3333-4333-8333-333333333301', 'Option 1 — Warm Travertine', null,
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a7546d3c-beab-4361-a88a-ca39696e02f3.png?width=800&format=webp',
+   null,
    'rejected', null, 'Client felt it read too beige against the north light.'),
   ('44444444-4444-4444-8444-444444440102', '33333333-3333-4333-8333-333333333301', 'Option 2 — Breccia & Oak', null,
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a1e986cf-9bce-4014-a3ba-2bf21217ff68.png?width=800&format=webp',
+   'https://palette.materialdepot.com/cdn-img/azure/application_image/living-room-with-arch-mouldings-original_medres.jpg?width=800&format=webp',
    'approved', now() - interval '38 days', 'Signed off on site. Oak louver behind the sofa is the hero.'),
   ('44444444-4444-4444-8444-444444440103', '33333333-3333-4333-8333-333333333301', 'Option 3 — Dark Moody', null,
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a8a2797c-cd51-4de5-a020-0a55ecd0d376.png?width=800&format=webp',
+   null,
    'rejected', null, null),
   -- Dining
   ('44444444-4444-4444-8444-444444440201', '33333333-3333-4333-8333-333333333302', 'Option 1 — Terrazzo Feature', null,
-   'https://palette.materialdepot.com/cdn-img/main/general-images/100d00b6-e562-469f-bf69-4e985aafadf1.png?width=800&format=webp',
+   'https://palette.materialdepot.com/cdn-img/azure/application_image/dining-wall-01-original_medres.jpg?width=800&format=webp',
    'approved', now() - interval '38 days', 'Same floor as living, terrazzo on the buffet wall.'),
   -- Kitchen
   ('44444444-4444-4444-8444-444444440301', '33333333-3333-4333-8333-333333333303', 'Option 1 — Ivory & Quartz', null,
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a7546d3c-beab-4361-a88a-ca39696e02f3.png?width=800&format=webp',
+   'https://palette.materialdepot.com/cdn-img/azure/application_image/l-shape-kitchen-with-glass-shelf-medres.jpg?width=800&format=webp',
    'approved', now() - interval '36 days', null),
   ('44444444-4444-4444-8444-444444440302', '33333333-3333-4333-8333-333333333303', 'Option 2 — Graphite', null, null, 'rejected', null, null),
   -- Master Bath — built in palette, scene slug kept so the link reopens it
   ('44444444-4444-4444-8444-444444440401', '33333333-3333-4333-8333-333333333304', 'Option 1 — Brown Glossy + Subway',
    'abstract-geometric-tile-bathroom-with-subway-tiles',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a8a2797c-cd51-4de5-a020-0a55ecd0d376.png?width=800&format=webp',
+   'https://palette.materialdepot.com/cdn-img/azure/application_image/abstract-geometric-tile-bathroom-with-subway-tiles-medres.jpg?width=800&format=webp',
    'approved', now() - interval '34 days', 'Visualised in Palette before the client meeting — that sold it.'),
-  ('44444444-4444-4444-8444-444444440402', '33333333-3333-4333-8333-333333333304', 'Option 2 — All Marble', null, null, 'rejected', null, null),
+  ('44444444-4444-4444-8444-444444440402', '33333333-3333-4333-8333-333333333304', 'Option 2 — All Marble', 'https://palette.materialdepot.com/cdn-img/azure/application_image/marble-bathroom-linear-layout-with-highlighter-shower-area-medres.webp?width=800&format=webp', null, 'rejected', null, null),
   -- Guest Bath: still with the client, NOTHING approved — so it is deliberately
   -- absent from the quote, and the Quote tab says so
   ('44444444-4444-4444-8444-444444440501', '33333333-3333-4333-8333-333333333305', 'Option 1 — Green Zellige', null,
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a1e986cf-9bce-4014-a3ba-2bf21217ff68.png?width=800&format=webp',
+   'https://palette.materialdepot.com/cdn-img/azure/application_image/earthy-bathroom-split-half-subway-tiles-medres.jpg?width=800&format=webp',
    'shared', null, 'Shared 4 days ago, no answer yet.'),
   ('44444444-4444-4444-8444-444444440502', '33333333-3333-4333-8333-333333333305', 'Option 2 — Black & White Geometric', null,
-   'https://palette.materialdepot.com/cdn-img/main/general-images/100d00b6-e562-469f-bf69-4e985aafadf1.png?width=800&format=webp',
+   'https://palette.materialdepot.com/cdn-img/azure/application_image/black-white-geometric-tiled-bathroom-with-plain-base-medres.jpg?width=800&format=webp',
    'shared', null, null),
   -- Master Bedroom
   ('44444444-4444-4444-8444-444444440601', '33333333-3333-4333-8333-333333333306', 'Option 1 — Oak & Linen', null,
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a7546d3c-beab-4361-a88a-ca39696e02f3.png?width=800&format=webp',
+   'https://palette.materialdepot.com/cdn-img/azure/application_image/bedroom-with-arched-mouldings_medres.jpg?width=800&format=webp',
    'approved', now() - interval '33 days', null),
   -- Rao Apartment: design stage, kitchen decided, the rest still open
   ('44444444-4444-4444-8444-444444441101', '33333333-3333-4333-8333-333333333311', 'Option 1 — Light Oak', null,
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a1e986cf-9bce-4014-a3ba-2bf21217ff68.png?width=800&format=webp',
+   'https://palette.materialdepot.com/cdn-img/azure/application_image/living-room-with-arch-mouldings-original_medres.jpg?width=800&format=webp',
    'shared', null, null),
   ('44444444-4444-4444-8444-444444441102', '33333333-3333-4333-8333-333333333311', 'Option 2 — Concrete & Brass', null, null, 'draft', null, null),
   ('44444444-4444-4444-8444-444444441201', '33333333-3333-4333-8333-333333333312', 'Option 1 — White Handleless', null,
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a8a2797c-cd51-4de5-a020-0a55ecd0d376.png?width=800&format=webp',
+   'https://palette.materialdepot.com/cdn-img/azure/application_image/u-shape-luxury-kitchen-highres-original_medres.jpeg?width=800&format=webp',
    'approved', now() - interval '9 days', null),
-  ('44444444-4444-4444-8444-444444441401', '33333333-3333-4333-8333-333333333314', 'Option 1 — Fluted Panel', null, null, 'draft', null, null),
+  ('44444444-4444-4444-8444-444444441401', '33333333-3333-4333-8333-333333333314', 'Option 1 — Fluted Panel', 'https://palette.materialdepot.com/cdn-img/azure/application_image/modern-tv-unit-with-fluted-panels-medres.jpg?width=800&format=webp', null, 'draft', null, null),
   -- Prakash Café
   ('44444444-4444-4444-8444-444444442101', '33333333-3333-4333-8333-333333333321', 'Final — Terrazzo Floor', null,
-   'https://palette.materialdepot.com/cdn-img/main/general-images/100d00b6-e562-469f-bf69-4e985aafadf1.png?width=800&format=webp',
+   null,
    'approved', now() - interval '110 days', null),
   ('44444444-4444-4444-8444-444444442201', '33333333-3333-4333-8333-333333333322', 'Final — Anti-skid', null, null, 'approved', now() - interval '110 days', 'Anti-skid is a licence condition, not a preference.'),
   ('44444444-4444-4444-8444-444444442301', '33333333-3333-4333-8333-333333333323', 'Final — Subway Washroom', null, null, 'approved', now() - interval '108 days', null),
@@ -218,12 +226,12 @@ insert into board_item (id, board_id, kind, surface, variant_id, sku, product_na
   -- ---- Living Room, approved board
   ('55555555-5555-4555-8555-555555550101', '44444444-4444-4444-8444-444444440102', 'product', 'Floor',
    'v-tl03547', 'TL 03547', 'Royal Breccia 1800x1200 mm Glossy Finish', 'Simpolo', 'Tiles', '1800x1200', 'Glossy',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a1e986cf-9bce-4014-a3ba-2bf21217ff68.png?width=400&format=webp',
+   null,
    'https://materialdepot.com/product/royal-breccia-1800x1200-glossy', 'sqft', 218.50, 265.00, 18, null,
    now() - interval '40 days', 441, 5, null, 1),
   ('55555555-5555-4555-8555-555555550102', '44444444-4444-4444-8444-444444440102', 'product', 'Feature Wall',
    'v-lv2210', 'LV 2210', 'Fluted Oak Louver Panel 12mm', 'Greenlam', 'Louvers', '2400x300', 'Matte',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a7546d3c-beab-4361-a88a-ca39696e02f3.png?width=400&format=webp',
+   null,
    null, 'sqft', 340.00, 425.00, 18, null, now() - interval '40 days', 96, 8, 'Behind the sofa, floor to ceiling.', 2),
   ('55555555-5555-4555-8555-555555550103', '44444444-4444-4444-8444-444444440102', 'product', 'Skirting',
    'v-sk1180', 'SK 1180', 'Matching Breccia Skirting 100mm', 'Simpolo', 'Tiles', '1200x100', 'Glossy',
@@ -231,23 +239,23 @@ insert into board_item (id, board_id, kind, surface, variant_id, sku, product_na
   -- ---- Dining, approved
   ('55555555-5555-4555-8555-555555550201', '44444444-4444-4444-8444-444444440201', 'product', 'Floor',
    'v-tl03547', 'TL 03547', 'Royal Breccia 1800x1200 mm Glossy Finish', 'Simpolo', 'Tiles', '1800x1200', 'Glossy',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a1e986cf-9bce-4014-a3ba-2bf21217ff68.png?width=400&format=webp',
+   null,
    'https://materialdepot.com/product/royal-breccia-1800x1200-glossy', 'sqft', 218.50, 265.00, 18, null,
    now() - interval '40 days', 189, 5, 'Runs continuous from the living room.', 1),
   ('55555555-5555-4555-8555-555555550202', '44444444-4444-4444-8444-444444440201', 'product', 'Feature Wall',
    'v-tl01103', 'TL 01103', 'Vibrant Terrazo Carving Matte Finish 600x1200', 'Orientbell', 'Tiles', '1200x600', 'Matte',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/100d00b6-e562-469f-bf69-4e985aafadf1.png?width=400&format=webp',
+   null,
    'https://materialdepot.com/product/vibrant-terrazo-carving-600x1200', 'sqft', 128.00, 168.00, 18, null,
    now() - interval '40 days', 116, 6, 'Buffet wall only.', 2),
   -- ---- Kitchen, approved. The floor tile is sold BY THE BOX with a coverage
   -- area, which is what lets the app compute boxes from the room's floor area.
   ('55555555-5555-4555-8555-555555550301', '44444444-4444-4444-8444-444444440301', 'product', 'Floor',
    'v-tl06622', 'TL 06622', 'Anti-Skid Vitrified 600x600 Matte — Grey', 'Kajaria', 'Tiles', '600x600', 'Anti-skid Matte',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a8a2797c-cd51-4de5-a020-0a55ecd0d376.png?width=400&format=webp',
+   null,
    null, 'box', 1180.00, 1450.00, 18, 15.50, now() - interval '38 days', 10, 6, null, 1),
   ('55555555-5555-4555-8555-555555550302', '44444444-4444-4444-8444-444444440301', 'product', 'Backsplash',
    'v-tl04961g', 'TL 04961 G', 'Subway Matte Finish Glacier White Ceramic Wall Tile', 'Nitco', 'Tiles', '300x75', 'Matte',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a7546d3c-beab-4361-a88a-ca39696e02f3.png?width=400&format=webp',
+   null,
    'https://materialdepot.com/product/subway-matte-glacier-white-300x75', 'sqft', 96.00, 125.00, 18, null,
    now() - interval '38 days', 64, 10, 'Stack bond, not running bond.', 2),
   ('55555555-5555-4555-8555-555555550303', '44444444-4444-4444-8444-444444440301', 'product', 'Countertop',
@@ -259,21 +267,21 @@ insert into board_item (id, board_id, kind, surface, variant_id, sku, product_na
   -- ---- Master Bath, approved (built in Palette)
   ('55555555-5555-4555-8555-555555550401', '44444444-4444-4444-8444-444444440401', 'product', 'Floor',
    'v-tl05510', 'TL 05510', 'Marble Look 600x600 Matte — Bianco', 'Somany', 'Tiles', '600x600', 'Matte',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a1e986cf-9bce-4014-a3ba-2bf21217ff68.png?width=400&format=webp',
+   null,
    null, 'sqft', 168.00, 205.00, 18, null, now() - interval '36 days', 69, 6, null, 1),
   ('55555555-5555-4555-8555-555555550402', '44444444-4444-4444-8444-444444440401', 'product', 'Lower Half Wall',
    'v-tl03538', 'TL 03538', 'Brown Glossy Finish 6ft x 4ft Glazed Vitrified', 'Simpolo', 'Tiles', '1800x1200', 'Glossy',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a8a2797c-cd51-4de5-a020-0a55ecd0d376.png?width=400&format=webp',
+   null,
    'https://materialdepot.com/product/brown-glossy-1800x1200-glazed', 'sqft', 192.00, 240.00, 18, null,
    now() - interval '36 days', 118, 8, null, 2),
   ('55555555-5555-4555-8555-555555550403', '44444444-4444-4444-8444-444444440401', 'product', 'Upper Half Wall',
    'v-tl04961g', 'TL 04961 G', 'Subway Matte Finish Glacier White Ceramic Wall Tile', 'Nitco', 'Tiles', '300x75', 'Matte',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a7546d3c-beab-4361-a88a-ca39696e02f3.png?width=400&format=webp',
+   null,
    'https://materialdepot.com/product/subway-matte-glacier-white-300x75', 'sqft', 96.00, 125.00, 18, null,
    now() - interval '36 days', 108, 10, null, 3),
   ('55555555-5555-4555-8555-555555550404', '44444444-4444-4444-8444-444444440401', 'product', 'Highlighter',
    'v-tl07731', 'TL 07731', 'Moroccan Pattern Highlighter 200x200', 'Orientbell', 'Tiles', '200x200', 'Matte',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/100d00b6-e562-469f-bf69-4e985aafadf1.png?width=400&format=webp',
+   null,
    null, 'sqft', 245.00, 310.00, 18, null, now() - interval '36 days', 26, 10, 'Shower niche band.', 4),
   ('55555555-5555-4555-8555-555555550405', '44444444-4444-4444-8444-444444440401', 'product', 'Countertop',
    'v-qz8840', 'QZ 8840', 'Engineered Quartz Calacatta 20mm', 'Kalinga', 'Countertops', '3200x1600', 'Polished',
@@ -287,16 +295,16 @@ insert into board_item (id, board_id, kind, surface, variant_id, sku, product_na
   -- the quote. Deliberate — the Quote tab reports the room as not signed off.
   ('55555555-5555-4555-8555-555555550501', '44444444-4444-4444-8444-444444440501', 'product', 'Lower Half Wall',
    'v-tl09912', 'TL 09912', 'Zellige Look Green Gloss 100x100', 'Orientbell', 'Tiles', '100x100', 'Gloss',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a1e986cf-9bce-4014-a3ba-2bf21217ff68.png?width=400&format=webp',
+   null,
    null, 'sqft', 285.00, 350.00, 18, null, now() - interval '4 days', 84, 12, null, 1),
   ('55555555-5555-4555-8555-555555550502', '44444444-4444-4444-8444-444444440502', 'product', 'Floor',
    'v-tl02218', 'TL 02218', 'Black & White Geometric Pattern 200x200', 'Nitco', 'Tiles', '200x200', 'Matte',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/100d00b6-e562-469f-bf69-4e985aafadf1.png?width=400&format=webp',
+   null,
    null, 'sqft', 178.00, 220.00, 18, null, now() - interval '4 days', 48, 10, null, 1),
   -- ---- Master Bedroom, approved
   ('55555555-5555-4555-8555-555555550601', '44444444-4444-4444-8444-444444440601', 'product', 'Floor',
    'v-wf4420', 'WF 4420', 'Engineered Oak Plank 14mm Natural', 'Pergo', 'Wooden Flooring', '1830x190', 'Matte Lacquer',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a7546d3c-beab-4361-a88a-ca39696e02f3.png?width=400&format=webp',
+   null,
    null, 'box', 4850.00, 5900.00, 18, 21.50, now() - interval '34 days', 11, 6, null, 1),
   ('55555555-5555-4555-8555-555555550602', '44444444-4444-4444-8444-444444440601', 'product', 'Headboard Wall',
    'v-wp6612', 'WP 6612', 'Textured Linen Wallpaper — Oat', 'Marshalls', 'Wallpaper', '10m x 53cm', 'Textured',
@@ -311,12 +319,12 @@ insert into board_item (id, board_id, kind, surface, variant_id, sku, product_na
   -- ---- Rao living room, still an option
   ('55555555-5555-4555-8555-555555551101', '44444444-4444-4444-8444-444444441101', 'product', 'Floor',
    'v-wf4402', 'WF 4402', 'Engineered Oak Plank 14mm Light', 'Pergo', 'Wooden Flooring', '1830x190', 'Matte Lacquer',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/a1e986cf-9bce-4014-a3ba-2bf21217ff68.png?width=400&format=webp',
+   null,
    null, 'box', 4650.00, 5600.00, 18, 21.50, now() - interval '11 days', 16, 6, null, 1),
   -- ---- Prakash Café
   ('55555555-5555-4555-8555-555555552101', '44444444-4444-4444-8444-444444442101', 'product', 'Floor',
    'v-tl01103', 'TL 01103', 'Vibrant Terrazo Carving Matte Finish 600x1200', 'Orientbell', 'Tiles', '1200x600', 'Matte',
-   'https://palette.materialdepot.com/cdn-img/main/general-images/100d00b6-e562-469f-bf69-4e985aafadf1.png?width=400&format=webp',
+   null,
    'https://materialdepot.com/product/vibrant-terrazo-carving-600x1200', 'sqft', 128.00, 168.00, 18, null,
    now() - interval '112 days', 1029, 5, null, 1),
   ('55555555-5555-4555-8555-555555552201', '44444444-4444-4444-8444-444444442201', 'product', 'Floor',

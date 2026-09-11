@@ -52,6 +52,17 @@ type SyncBody = { events?: IncomingEvent[]; orders?: IncomingOrder[] }
 
 type Skip = { key: string; reason: 'no_match' | 'ambiguous' | 'bad_phone' | 'bad_row'; detail?: string }
 
+/**
+ * Drop keys the caller did not send, so an upsert leaves those columns alone
+ * instead of overwriting them with null.
+ *
+ * `null` is kept — sending an explicit null is how a caller says "clear this".
+ * Only `undefined` is dropped.
+ */
+function defined<T extends Record<string, unknown>>(row: T): Partial<T> {
+  return Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined)) as Partial<T>
+}
+
 export async function POST(req: Request) {
   const secret = process.env.SYNC_SHARED_SECRET
   if (!secret) {
@@ -133,17 +144,25 @@ export async function POST(req: Request) {
     }
     const ref = resolve(e.phone, e.external_id)
     if (!ref) continue
-    eventRows.push({
-      referral_id: ref.id,
-      event_type: e.event_type,
-      occurred_at: e.occurred_at,
-      store: e.store ?? null,
-      title: e.title ?? null,
-      detail: e.detail ?? null,
-      amount: e.amount ?? null,
-      payload: e.payload ?? {},
-      external_id: e.external_id,
-    })
+    // Only the keys the caller actually sent. `store: e.store ?? null` looks
+    // harmless and is not: an upsert writes every column in the payload, so a
+    // re-sync that carries just the id and the value would blank the store and
+    // the date on a row that already had them. Verified the hard way against
+    // production on 2026-09-11 — an order lost its store and ordered_on to
+    // exactly this.
+    eventRows.push(
+      defined({
+        referral_id: ref.id,
+        event_type: e.event_type,
+        occurred_at: e.occurred_at,
+        store: e.store,
+        title: e.title,
+        detail: e.detail,
+        amount: e.amount,
+        payload: e.payload,
+        external_id: e.external_id,
+      }),
+    )
   }
 
   const orderRows = []
@@ -155,15 +174,17 @@ export async function POST(req: Request) {
     }
     const ref = resolve(o.phone, o.md_enq_id)
     if (!ref) continue
-    orderRows.push({
-      referral_id: ref.id,
-      md_enq_id: o.md_enq_id,
-      order_value: Number(o.order_value) || 0,
-      ordered_on: o.ordered_on ?? null,
-      store: o.store ?? null,
-      status: o.status ?? null,
-      synced_at: new Date().toISOString(),
-    })
+    orderRows.push(
+      defined({
+        referral_id: ref.id,
+        md_enq_id: o.md_enq_id,
+        order_value: Number(o.order_value) || 0,
+        ordered_on: o.ordered_on,
+        store: o.store,
+        status: o.status,
+        synced_at: new Date().toISOString(),
+      }),
+    )
     touchedPartners.add(ref.partner_id)
   }
 

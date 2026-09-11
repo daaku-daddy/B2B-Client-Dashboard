@@ -244,14 +244,19 @@ function Row({
         {item.delivered_on ? <p className="mt-0.5 text-[10px] text-ink-faint">{date(item.delivered_on)}</p> : null}
       </Td>
       <Td>
+        {/* w-28 clipped a real Material Depot enquiry id — ENQ2026072884321
+            rendered as ENQ2026072884, which is a different number to anyone
+            reading it. Wide enough for the full 16 characters, with the value
+            on the title as a backstop. */}
         <Input
           defaultValue={item.md_enq_id ?? ''}
           placeholder="ENQ…"
+          title={item.md_enq_id ?? undefined}
           onBlur={(e) => {
             const v = e.target.value.trim() || null
             if (v !== item.md_enq_id) save({ md_enq_id: v })
           }}
-          className="h-7 w-28 font-mono text-[11px]"
+          className="h-7 w-[10.5rem] px-2 font-mono text-[11px]"
         />
       </Td>
       <Td className="tnum text-right text-xs font-medium">{inr(item.qty_required * item.rate)}</Td>

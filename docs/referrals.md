@@ -53,7 +53,15 @@ using the service-role key to write tables partners can only read.
 store arrival has been seen logged twenty times — and "visited 20 times on the
 9th" is a number an architect would read and believe.
 
-**2. Exact phone matching, three outcomes.** A row matches one referral, matches
+**2. A partial payload must not erase what is already there.** Rows are built
+by `defined()`, which drops keys the caller did not send, so an upsert carrying
+only `md_enq_id` and `order_value` leaves the store and the date alone. Writing
+`store: o.store ?? null` instead looks harmless and is not: it blanks the
+column on every re-sync. Found against production on 2026-09-11 by re-posting a
+seeded order, which promptly lost its store and `ordered_on`. An explicit
+`null` is still honoured — that is how a caller says "clear this".
+
+**3. Exact phone matching, three outcomes.** A row matches one referral, matches
 none, or matches **more than one** (two architects both claiming the same
 client). The third is reported as `ambiguous` and skipped, never resolved by a
 heuristic: attributing an order to the wrong architect pays the wrong person.

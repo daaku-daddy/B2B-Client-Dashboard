@@ -14,6 +14,16 @@ import { cn } from '@/lib/cn'
 
 const STAGE_TONE = { design: 'info', procurement: 'warn', execution: 'good', closed: 'neutral' } as const
 
+// The column values are snake_case; a badge reading "on_hold" is the database
+// leaking onto the screen.
+const STATUS_LABEL: Record<Project['status'], string> = {
+  active: 'Active',
+  on_hold: 'On hold',
+  won: 'Won',
+  lost: 'Lost',
+  closed: 'Closed',
+}
+
 export function ProjectsView({
   projects,
   clients,
@@ -119,7 +129,9 @@ export function ProjectsView({
                     <div className="text-ink-faint">{p.target_on ? `target ${date(p.target_on)}` : `started ${date(p.started_on)}`}</div>
                   </div>
                   <Badge tone={STAGE_TONE[p.stage]}>{STAGES.find((s) => s.key === p.stage)?.label ?? p.stage}</Badge>
-                  {p.status !== 'active' ? <Badge tone={p.status === 'lost' ? 'bad' : 'neutral'}>{p.status}</Badge> : null}
+                  {p.status !== 'active' ? (
+                    <Badge tone={p.status === 'lost' ? 'bad' : 'neutral'}>{STATUS_LABEL[p.status]}</Badge>
+                  ) : null}
                 </Link>
               </li>
             ))}
