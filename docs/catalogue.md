@@ -89,3 +89,19 @@ testing, not the fix.
 Palette's own login is `/api/login-otp` → `/api/verify-otp` (phone + OTP,
 returns a bearer token) and it has `/api/wishlist` and `/api/inspiration`. None
 of that is wired in here yet — see `docs/auth.md`.
+
+### Its images come in two shapes, and only one of them is a picture
+
+| Path | What it is |
+|---|---|
+| `/cdn-img/azure/application_image/<scene>-medres.jpg` | **the scene photograph** — 40–120 KB, what the gallery shows |
+| `/cdn-img/main/general-images/<uuid>.png` | a scene compositing **layer** — ~2 KB, near-transparent |
+
+Both return `200 image/webp` through the transform proxy, so a `curl -o
+/dev/null -w %{http_code}` check passes on either. The seed used the uuid ones
+first and every board cover rendered as a blank white box — the image had
+loaded, `naturalWidth` was 800, and there was nothing to see. Check the byte
+size, not just the status.
+
+Per-product swatches are not fetchable at all: palette draws them to a canvas,
+so there is no URL behind them.
