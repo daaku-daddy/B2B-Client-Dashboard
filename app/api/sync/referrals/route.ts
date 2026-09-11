@@ -227,11 +227,22 @@ async function recordUnlockedTiers(
     const due = tiers.filter((t) => total >= Number(t.threshold))
     if (!due.length) continue
 
-    const { error } = await db.from('reward_claim').upsert(
-      due.map((t) => ({ partner_id: partnerId, tier_id: t.id, status: 'unlocked' as const })),
-      { onConflict: 'partner_id,tier_id', ignoreDuplicates: true },
+    // Only report tiers crossed BY THIS SYNC. An upsert with ignoreDuplicates
+    // writes the right rows either way, but it cannot say which were new — so
+    // reporting `due` made every nightly run claim the partner had just earned
+    // every tier they had ever earned. Anything hung off this field (an email,
+    // a push) would have fired again every night.
+    const { data: already, error: readErr } = await db
+      .from('reward_claim').select('tier_id').eq('partner_id', partnerId)
+    if (readErr) continue
+    const have = new Set((already ?? []).map((r) => r.tier_id as number))
+    const fresh = due.filter((t) => !have.has(t.id))
+    if (!fresh.length) continue
+
+    const { error } = await db.from('reward_claim').insert(
+      fresh.map((t) => ({ partner_id: partnerId, tier_id: t.id, status: 'unlocked' as const })),
     )
-    if (!error) due.forEach((t) => out.push({ partner_id: partnerId, tier_id: t.id }))
+    if (!error) fresh.forEach((t) => out.push({ partner_id: partnerId, tier_id: t.id }))
   }
   return out
 }

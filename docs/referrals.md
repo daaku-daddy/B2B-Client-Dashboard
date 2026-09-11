@@ -66,10 +66,18 @@ reporting exists to prevent.
 ### It also records tier unlocks
 
 After writing orders, `recordUnlockedTiers()` recomputes each touched partner's
-attributed total and upserts `reward_claim` rows for every threshold crossed
-(`ignoreDuplicates`, so it is safe to re-run). It never deletes a claim — a
-corrected order value that drops a partner back below a threshold does not
-un-give a gold coin.
+attributed total and inserts a `reward_claim` row for each threshold crossed. It
+never deletes a claim — a corrected order value that drops a partner back below
+a threshold does not un-give a gold coin.
+
+**`tiers_unlocked` in the response means "crossed by THIS sync", not "earned".**
+That distinction cost a bug: the first version upserted with `ignoreDuplicates`
+and reported everything *due*, so a nightly run announced all six tiers every
+night. Anything hung off this field — an email, a push notification — would have
+congratulated the partner daily for a coin they got in July. The route now reads
+the existing claims first and reports only the difference. Verified against
+production on 2026-09-11: re-posting a seeded order returns `tiers_unlocked: []`
+and leaves the attributed total unchanged.
 
 ## The referral record
 
