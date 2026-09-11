@@ -11,19 +11,39 @@ at <https://b2b-client-dashboard-eight.vercel.app/>.
 npm run dev        # next dev — NOTE: :3000 is usually the materialdepot-crm
                    #  dev server, so this lands on :3001. Read the log line.
 npm run build      # next build
-npm run typecheck  # tsc --noEmit — the only automated check in this repo
+npm run typecheck  # tsc --noEmit
+
+cd supabase/test && npm install && npm run all   # the SQL + RLS suite
 ```
 
-There is no lint command and no test suite. `npm run typecheck` plus
-`npm run build` is the whole gate; run both before claiming a change works.
+There is no lint command. The gate is `npm run typecheck`, `npm run build`, and
+— for anything touching `supabase/` — the suite in `supabase/test`, which runs
+the migrations and the seed against a throwaway Postgres 18 and asserts 51
+things about RLS. **Run all three before claiming a change works.**
+
+And then look at it. Every one of the six bugs in `docs/landmines.md` passed
+`tsc` and `build`; five of them were found by signing in as the demo firm and
+walking the tabs. `supabase/seed/001_demo.sql` exists so that is a two-minute
+job rather than an hour of data entry.
 
 ## The one thing to know first
 
-**The database schema is not applied by anything in this repo.** `supabase/migrations/*.sql`
-has to be pasted into the Supabase SQL Editor by hand. Until it is, every page
-renders its "could not load your workspace" state — which is correct behaviour,
-not a bug. See `supabase/migrations/README.md` for the checklist and which of
-the three Material Depot Supabase projects this one is.
+**No SQL in this repo runs itself.** `supabase/migrations/*.sql` and
+`supabase/seed/001_demo.sql` are pasted into the Supabase SQL Editor by hand.
+Both migrations were applied on 2026-09-11; `supabase/migrations/README.md` is
+the checklist and says which of the four Material Depot Supabase projects this
+one is.
+
+**A migration committed here is not evidence it was applied.** If a column is
+missing at runtime, check the live table before assuming the code is wrong. And
+before handing anyone SQL to paste, run it through `supabase/test` — two of the
+six entries in `docs/landmines.md` are seed bugs that would otherwise have died
+a third of the way through someone's paste.
+
+Demo login, once the seed is in: `demo.studio@materialdepot.com` /
+`DemoStudio2026!`. This Supabase project has **email confirmation ON**, so a
+fresh sign-up gets "check your email" and no session — the seed confirms that
+one address for you.
 
 ## Shape of the app
 
@@ -37,10 +57,13 @@ the three Material Depot Supabase projects this one is.
 | `lib/domain/**` | The rules: money, quantity, areas, rewards, project stages. No I/O in here. |
 | `lib/data/**` | Reads (`queries.ts`), writes (`actions.ts`), the `Result` type, the session. |
 | `components/**` | `ui/` primitives, then one folder per module. |
+| `supabase/migrations/**` | The schema and the RLS policies. Pasted by hand. |
+| `supabase/seed/001_demo.sql` | A whole demo firm — 5 projects, boards, quotes, procurement, ledger, referrals, rewards. Idempotent. |
+| `supabase/test/**` | Migrations + seed + 51 RLS assertions against a throwaway Postgres. Its deps are deliberately outside the app's `package.json`. |
 
 ## House rules
 
-Four conventions carry most of the weight. Breaking one is how this app would
+Five conventions carry most of the weight. Breaking one is how this app would
 start lying to an architect about their own money.
 
 ### 1. A failure is never an empty list
@@ -78,6 +101,13 @@ is unique, which is what makes the incentive total idempotent under a re-sync.
 `reward_claim` records that a tier was *reached* and whether it was handed over
 — it is not the source of truth for whether it is unlocked.
 
+### 5. A write must not destroy what it was not told about
+
+An upsert writes every column in its payload, so building a row with
+`store: o.store ?? null` blanks the store on every re-sync that omits it.
+Payload-shaped writes go through a `defined()` filter that drops `undefined`
+keys; an explicit `null` still clears. This one shipped — `docs/landmines.md`.
+
 ## Docs
 
 Module detail lives in `docs/`, read on demand:
@@ -93,6 +123,8 @@ Module detail lives in `docs/`, read on demand:
 | `docs/referrals.md` | The three systems referral data lives in, and the sync contract |
 | `docs/rewards.md` | The six tiers, cumulative unlocking, handover |
 | `docs/open-questions.md` | What is decided by default and needs a human to confirm |
+| `docs/landmines.md` | **Six bugs already shipped here**, kept because the shape of each recurs. Read before trusting a passing build. |
+| `supabase/test/README.md` | What the 51 assertions cover, and the two shim details that are load-bearing |
 
 **When you change behaviour a doc describes, update that doc in the same
 commit.** A doc describing last month's behaviour is worse than no doc, because
@@ -107,8 +139,16 @@ Directory named "public" found* even though `next build` had just succeeded.
 Keeping the framework in the repo means a new deployment cannot inherit that
 setting again.
 
-Environment variables live in the Vercel project, not here. Production and
-Development carry the two `NEXT_PUBLIC_SUPABASE_*` values; `SUPABASE_SERVICE_ROLE_KEY`
-and `SYNC_SHARED_SECRET` are **not set**, so `/api/sync/referrals` returns 503
-until they are. That is the intended behaviour — it says which variable is
-missing rather than failing silently.
+Environment variables live in the Vercel project, not here. All four are set on
+**Production and Development** as of 2026-09-11:
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+`SUPABASE_SERVICE_ROLE_KEY`, `SYNC_SHARED_SECRET`.
+
+**Preview is still missing the two `NEXT_PUBLIC_*` ones** — `vercel env add …
+preview` loops on `git_branch_required` whichever documented form you use, so
+they need adding in the dashboard.
+
+An env var only reaches a NEW deployment, so `vercel --prod` after changing one.
+`/api/sync/referrals` returns 503 naming the missing variable rather than
+failing silently, which is also how you check from outside whether a deploy
+picked the value up.
