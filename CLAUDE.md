@@ -7,6 +7,12 @@ finances, and visibility of the clients they refer to Material Depot.
 Next.js 16 (App Router, Turbopack) + Tailwind 4 + Supabase. Deployed on Vercel
 at <https://b2b-client-dashboard-eight.vercel.app/>.
 
+**This repo is PUBLIC** (`daaku-daddy/B2B-Client-Dashboard`, verified
+2026-09-14). Everything committed is world-readable, so no real partner or
+client names, phone numbers, GSTINs, order values or tokens in code, seeds,
+fixtures, commit messages or docs. `supabase/seed/001_demo.sql` is invented data
+and must stay that way.
+
 ```bash
 npm run dev        # next dev — NOTE: :3000 is usually the materialdepot-crm
                    #  dev server, so this lands on :3001. Read the log line.
@@ -31,7 +37,7 @@ job rather than an hour of data entry.
 **No SQL in this repo runs itself.** `supabase/migrations/*.sql` and
 `supabase/seed/001_demo.sql` are pasted into the Supabase SQL Editor by hand.
 Both migrations were applied on 2026-09-11; `supabase/migrations/README.md` is
-the checklist and says which of the four Material Depot Supabase projects this
+the checklist and says which of the three Material Depot Supabase projects this
 one is.
 
 **A migration committed here is not evidence it was applied.** If a column is

@@ -24,9 +24,17 @@ enough that changing it is expensive.
   datacentre egress, with Django's CSRF check behind it. Two owners, two fixes,
   in that order — `docs/catalogue.md`. The product picker says which wall it hit
   and offers manual entry.
-- **Referral data has no producer yet.** `/api/sync/referrals` is the contract
-  and it works; nothing is pushing to it. Until something does, the referral
-  timeline is empty and says so.
+- **Referral data has no producer yet — but one is now designed.**
+  `/api/sync/referrals` is the contract and it works; nothing is pushing to it,
+  so the referral timeline is empty and says so. The producer belongs in the
+  CRM, not here: `materialdepot-crm` `docs/b2b/partner-bridge.md` (2026-09-14)
+  holds the push contract, the exact-phone matching rule, and the one endpoint
+  this app still owes — `POST /api/sync/partners`, plus migration `003` adding
+  `partner.md_client_id unique` so a CRM client row and a partner row are
+  linked rather than name-matched. That design also records why **this app must
+  never call Django** for it. The CRM holds 26 architect/interior-design firms
+  with valid phones that could be provisioned today; this project holds one, the
+  demo seed.
 - **Palette boards are linked, not embedded.** "Visualise in Palette" opens
   palette in a new tab with the right scene. Saving a rendered scene back onto a
   board (palette has `/api/upload` and a Save button) would need palette to
