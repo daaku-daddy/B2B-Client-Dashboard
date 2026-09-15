@@ -1,3 +1,4 @@
+import { WorkspaceOff } from '@/components/shell/WorkspaceOff'
 import { notFound } from 'next/navigation'
 import {
   getClient, getProject, listAreas, listBoardItems, listBoards, listFinance,
@@ -10,6 +11,11 @@ import { Problem } from '@/components/ui'
 import type { QuoteLine } from '@/lib/domain/types'
 
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
+  // The project workspace is opt-in per firm. Checked here as well as in
+  // the nav: a nav item that is merely hidden is still a URL anyone can type.
+  const gate = await currentSession()
+  if (gate.ok && gate.data && !gate.data.partner.workspace_enabled) return <WorkspaceOff what="Projects" />
+
   const { id } = await params
 
   const [project, session] = await Promise.all([getProject(id), currentSession()])

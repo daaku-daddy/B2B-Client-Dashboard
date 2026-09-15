@@ -1,7 +1,7 @@
 # SQL tests
 
-Runs `migrations/`, `seed/` and an RLS isolation suite against a **throwaway
-Postgres 18** that lives in `./data`. Nothing here touches the real Supabase
+Runs every file in `migrations/`, both files in `seed/`, and an RLS isolation
+suite against a **throwaway Postgres 18** that lives in `./data`. Nothing here touches the real Supabase
 project, and its dependencies are deliberately kept out of the app's
 `package.json` so building the site never downloads Postgres binaries.
 
@@ -36,7 +36,7 @@ exists` and inflated row counts, not as a clear error.
 
 ## What `rlstest.js` asserts
 
-51 checks, in six groups:
+108 checks, in fourteen groups:
 
 1. The demo partner can read all thirteen of their own tables.
 2. **A second architect reads none of it.** This is the whole reason RLS is on
@@ -50,6 +50,31 @@ exists` and inflated row counts, not as a clear error.
 6. `onboard_partner()` normalises `+91 98450 99887` to ten digits, refuses a
    second firm for one login, refuses a phone another firm already holds, and
    refuses a number that is not an Indian mobile.
+7. **Market segregation.** The Bangalore outreach manager sees the Bangalore
+   firm and not the Hyderabad one; the Hyderabad KAM sees the reverse; a staff
+   member with no market set sees both. Asserted **by id, not by row count** —
+   the suite's own fixture firm has no market and is deliberately visible to
+   everyone, so counting would make a documented rule read as a leak.
+8. **The trust boundary.** An admin and a KAM read zero rows from all nine of
+   `client`, `project`, `project_area`, `board`, `board_item`, `quote`,
+   `quote_line`, `procurement_item`, `finance_entry` — while still reading the
+   referrals a firm sent us. This is the group that matters most.
+9. A partner reads nothing from `staff_user`, `partner_application`,
+   `outreach_prospect` or `outreach_touch`; sees their own activity minus the
+   rows staff marked internal; and gets exactly one row from `my_kam()`.
+10. **The order approval gate.** A partner's direct UPDATE matches 0 rows, a
+    partner and a KAM are both refused by `review_referral_order()`, and an
+    admin succeeds and is stamped as the approver.
+11. **The portfolio gate.** A firm can submit a draft and cannot publish it
+    (`42501` from the `with check`), a published piece is frozen, and only an
+    admin can call `review_portfolio_item()`.
+12. **The fields Material Depot owns.** A firm can rename itself and cannot
+    touch `workspace_enabled`, `kam_user_id`, `market`, `phone` or
+    `internal_note`; an admin can.
+13. `onboard_partner()` refuses a login that already belongs to the staff table.
+14. **A re-sync cannot undo an approval** — the exact upsert PostgREST generates
+    for `/api/sync/referrals` leaves `approval_status` and the columns it did not
+    send alone, and a newly synced order arrives `pending`.
 
 Every expected-failure check is wrapped in a savepoint. Without that, the first
 `42501` aborts the transaction and every later assertion reports `25P02`

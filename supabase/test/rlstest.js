@@ -5,6 +5,26 @@ const OTHER_UID = '11111111-2222-3333-4444-555555555555'
 const TABLES = ['client','project','project_area','board','board_item','quote','quote_line',
                 'procurement_item','finance_entry','referral','referral_event','referral_order','reward_claim']
 
+// The console's own tables. A partner must read none of them.
+const CONSOLE_TABLES = ['staff_user','partner_application','outreach_prospect','outreach_touch']
+
+// The architect's private workspace. Material Depot staff must read none of it —
+// this list is the trust boundary of the whole product, checked by name in
+// group 8 because a well-meant "just for support" policy on any one of them
+// would throw away the reason a designer puts their work in here at all.
+const PRIVATE_TABLES = ['client','project','project_area','board','board_item',
+                        'quote','quote_line','procurement_item','finance_entry']
+
+// The demo staff logins, from supabase/test/user.sql + seed/002_console.sql.
+const ADMIN_UID    = '5ca1ab1e-0000-4000-8000-000000000001'
+const KAM_BLR_UID  = '5ca1ab1e-0000-4000-8000-000000000002'
+const KAM_HYD_UID  = '5ca1ab1e-0000-4000-8000-000000000003'
+const OUT_BLR_UID  = '5ca1ab1e-0000-4000-8000-000000000004'
+const INBOUND_UID  = '5ca1ab1e-0000-4000-8000-000000000006'
+
+const TERRA     = '0d0d0d0d-0000-4000-8000-000000000001'
+const VERANDAH  = '0d0d0d0d-0000-4000-8000-000000000011'
+
 let pass = 0, fail = 0
 const check = (name, ok, extra = '') => {
   console.log(`${ok ? '  PASS' : '  FAIL'}  ${name}${extra ? ' — ' + extra : ''}`)
@@ -29,9 +49,15 @@ async function asUser(c, uid, fn) {
                  on conflict (id) do nothing`)
   await c.query(`insert into partner_user (user_id, partner_id) values ($1,'0d0d0d0d-0000-4000-8000-000000000002')
                  on conflict (user_id) do nothing`, [OTHER_UID])
-  await c.query(`insert into client (partner_id, name, phone)
-                 values ('0d0d0d0d-0000-4000-8000-000000000002','Rival Client','9911122233')
-                 on conflict do nothing`)
+  // A FIXED id. `on conflict do nothing` with no target does nothing at all
+  // here — `client` has no unique constraint to conflict on — so without this
+  // every re-run against a surviving cluster added another rival client and
+  // group 2 failed with "3 rows (expected 1)", which reads as a leak and is a
+  // harness artefact.
+  await c.query(`insert into client (id, partner_id, name, phone)
+                 values ('c1c1c1c1-0000-4000-8000-000000000001',
+                         '0d0d0d0d-0000-4000-8000-000000000002','Rival Client','9911122233')
+                 on conflict (id) do nothing`)
 
   console.log('\n1. The demo partner sees their own data')
   await asUser(c, DEMO_UID, async () => {
@@ -55,7 +81,7 @@ async function asUser(c, uid, fn) {
 
   console.log('\n3. Signed out (anon) sees nothing at all')
   await c.query('begin'); await c.query('set local role anon')
-  for (const t of [...TABLES, 'partner', 'reward_tier']) {
+  for (const t of [...TABLES, 'partner', 'reward_tier', ...CONSOLE_TABLES]) {
     const { rows } = await c.query(`select count(*)::int n from ${t}`)
     check(`${t} closed to anon`, rows[0].n === 0, `${rows[0].n} rows`)
   }
@@ -107,6 +133,199 @@ async function asUser(c, uid, fn) {
     catch (e) { check('refuses a non-mobile number', /10-digit/.test(e.message), e.message.slice(0, 60)) }
     await c.query('rollback to savepoint sp2')
   })
+
+  // ------------------------------------------------------------ the console
+
+  const count = async (sql, params = []) => (await c.query(sql, params)).rows[0].n
+  // Every expected failure gets its own savepoint. Without one, the first 42501
+  // aborts the transaction and every later assertion reports 25P02 instead —
+  // which looks like a dozen bugs and is one harness mistake.
+  async function blocked(name, sql, params = [], code = '42501') {
+    await c.query('savepoint sp')
+    try {
+      await c.query(sql, params)
+      check(name, false, 'IT WENT THROUGH')
+    } catch (e) {
+      check(name, e.code === code, e.code + ' ' + (e.message || '').slice(0, 60))
+    }
+    await c.query('rollback to savepoint sp')
+  }
+
+  console.log('\n7. Staff see their market, and only their market')
+  // By id, not by row count: the suite's own 'Rival Design Co' has no market,
+  // and an unassigned firm is deliberately visible to everyone on the team
+  // (a firm nobody can see is a firm nobody follows up). Counting would make
+  // that documented rule read as a leak.
+  const sees = async (id) => (await count('select count(*)::int n from partner where id = $1', [id])) === 1
+
+  await asUser(c, ADMIN_UID, async () => {
+    check('admin sees the Bangalore firm', await sees(TERRA))
+    check('admin sees the Hyderabad firm', await sees(VERANDAH))
+    check('admin sees every prospect', (await count('select count(*)::int n from outreach_prospect')) === 6)
+    check('admin sees every application', (await count('select count(*)::int n from partner_application')) === 3)
+  })
+  await asUser(c, OUT_BLR_UID, async () => {
+    check('Bangalore outreach sees the Bangalore firm', await sees(TERRA))
+    check('...and NOT the Hyderabad one', !(await sees(VERANDAH)))
+    check('Bangalore outreach sees 3 Bangalore prospects',
+      (await count("select count(*)::int n from outreach_prospect")) === 3)
+    check('...none of them Hyderabad',
+      (await count("select count(*)::int n from outreach_prospect where market = 'hyderabad'")) === 0)
+    check('Bangalore outreach sees 1 Bangalore application',
+      (await count('select count(*)::int n from partner_application')) === 1)
+  })
+  await asUser(c, KAM_HYD_UID, async () => {
+    check('Hyderabad KAM sees the Hyderabad firm', await sees(VERANDAH))
+    check('...and NOT the Bangalore one', !(await sees(TERRA)))
+    check('Hyderabad KAM sees no Bangalore prospects',
+      (await count("select count(*)::int n from outreach_prospect where market = 'bangalore'")) === 0)
+  })
+  await asUser(c, INBOUND_UID, async () => {
+    check('a staff member with no market set covers Bangalore', await sees(TERRA))
+    check('...and Hyderabad too', await sees(VERANDAH))
+  })
+
+  console.log("\n8. THE TRUST BOUNDARY — staff cannot read an architect's work")
+  await asUser(c, ADMIN_UID, async () => {
+    for (const t of PRIVATE_TABLES) {
+      check(`admin cannot read ${t}`, (await count(`select count(*)::int n from ${t}`)) === 0)
+    }
+    check('admin CAN read the referrals a firm sent us',
+      (await count('select count(*)::int n from referral')) > 0)
+  })
+  await asUser(c, KAM_BLR_UID, async () => {
+    check('a KAM cannot read their own firm’s quotes',
+      (await count('select count(*)::int n from quote')) === 0)
+    check('a KAM cannot read their own firm’s ledger',
+      (await count('select count(*)::int n from finance_entry')) === 0)
+  })
+
+  console.log('\n9. A partner cannot read the console')
+  await asUser(c, DEMO_UID, async () => {
+    for (const t of CONSOLE_TABLES) {
+      check(`${t} closed to a partner`, (await count(`select count(*)::int n from ${t}`)) === 0)
+    }
+    check('sees their own activity, minus the internal notes',
+      (await count('select count(*)::int n from partner_activity')) === 5)
+    check('internal staff notes stay internal',
+      (await count('select count(*)::int n from partner_activity where not visible_to_partner')) === 0)
+    const { rows } = await c.query('select * from my_kam()')
+    check('my_kam() returns their KAM and nobody else', rows.length === 1 && rows[0].name === 'Rahul Desai',
+      rows[0]?.name)
+  })
+
+  console.log('\n10. The order approval gate')
+  await asUser(c, DEMO_UID, async () => {
+    // No UPDATE policy means the update matches no rows rather than erroring —
+    // silent, and exactly as safe. Assert the row count, not an exception.
+    const r = await c.query("update referral_order set approval_status = 'approved' where approval_status = 'pending'")
+    check('a partner cannot approve their own order', r.rowCount === 0, `${r.rowCount} rows`)
+    await blocked('a partner cannot call review_referral_order()',
+      "select review_referral_order((select id from referral_order where approval_status = 'pending'), 'approved')")
+  })
+  const pendingId = (await c.query("select id from referral_order where approval_status = 'pending' limit 1")).rows[0].id
+  await asUser(c, KAM_BLR_UID, async () => {
+    await blocked('a KAM cannot approve an order either',
+      'select review_referral_order($1, $2)', [pendingId, 'approved'])
+  })
+  await asUser(c, ADMIN_UID, async () => {
+    await c.query('select review_referral_order($1, $2, $3)', [pendingId, 'approved', 'checked against the invoice'])
+    const { rows } = await c.query('select approval_status, approved_by from referral_order where id = $1', [pendingId])
+    check('an admin can, and it stamps who did it',
+      rows[0].approval_status === 'approved' && rows[0].approved_by === ADMIN_UID)
+  })
+
+  console.log('\n11. A firm owns its portfolio up to the point it asks to be published')
+  await asUser(c, DEMO_UID, async () => {
+    const draft = (await c.query("select id from portfolio_item where status = 'draft' limit 1")).rows[0].id
+    const live  = (await c.query("select id from portfolio_item where status = 'published' limit 1")).rows[0].id
+    // Publish first, while the row is still a draft. Submitting it first would
+    // make `using` reject the next update for 0 rows, which reads as a pass for
+    // the wrong reason — the point here is that `with check` refuses the STATUS.
+    await blocked("a firm cannot publish its own work",
+      "update portfolio_item set status = 'published' where id = $1", [draft])
+    const r = await c.query("update portfolio_item set status = 'submitted' where id = $1", [draft])
+    check('draft can be submitted for review', r.rowCount === 1)
+    const r2 = await c.query("update portfolio_item set title = 'rewritten' where id = $1", [live])
+    check('a published piece is frozen to the firm', r2.rowCount === 0, `${r2.rowCount} rows`)
+    await blocked('a firm cannot call review_portfolio_item()',
+      "select review_portfolio_item($1, 'published')", [live])
+  })
+  await asUser(c, ADMIN_UID, async () => {
+    const sub = (await c.query("select id from portfolio_item where status = 'submitted' limit 1")).rows[0].id
+    await c.query("select review_portfolio_item($1, 'published', 'good set')", [sub])
+    const { rows } = await c.query('select status from portfolio_item where id = $1', [sub])
+    check('an admin can publish it', rows[0].status === 'published', rows[0].status)
+  })
+
+  console.log('\n12. The fields Material Depot owns on a firm')
+  await asUser(c, DEMO_UID, async () => {
+    const r = await c.query("update partner set firm_name = 'Studio Terra Design' where id = $1", [TERRA])
+    check('a firm can rename itself', r.rowCount === 1)
+    for (const [label, col, val] of [
+      // `not workspace_enabled`, not `true`: the demo firm already has it on, and
+      // a no-op write is not `distinct from` the old value, so the guard lets it
+      // through and the test passes without testing anything.
+      ['switch its own workspace', 'workspace_enabled', 'not workspace_enabled'],
+      ['reassign its own KAM', 'kam_user_id', 'null'],
+      ['move itself to another market', "market", "'hyderabad'"],
+      ['change the phone its referrals match on', 'phone', "'9999988888'"],
+      ['write its own internal note', 'internal_note', "'we are great'"],
+    ]) {
+      await blocked(`a firm cannot ${label}`,
+        `update partner set ${col} = ${val} where id = $1`, [TERRA])
+    }
+  })
+  await asUser(c, ADMIN_UID, async () => {
+    const r = await c.query('update partner set workspace_enabled = false where id = $1', [TERRA])
+    check('an admin can', r.rowCount === 1)
+  })
+
+  console.log('\n13. A staff login is not a firm')
+  await asUser(c, ADMIN_UID, async () => {
+    await blocked('onboard_partner refuses a staff login',
+      "select onboard_partner('Side Business','Someone','9845077777')", [], 'P0001')
+  })
+
+  console.log('\n14. A re-sync cannot undo an approval')
+  // The sync route upserts on md_enq_id with a payload that never mentions
+  // approval_status, so the column is left alone on an existing row. That is the
+  // whole reason a nightly run cannot reset — or grant — an admin's decision, and
+  // it is worth asserting in SQL rather than trusting to a comment in the route.
+  {
+    const enq = 'ENQRESYNC000001'
+    const refId = (await c.query(`select id from referral limit 1`)).rows[0].id
+    await c.query(
+      `insert into referral_order (referral_id, md_enq_id, order_value, ordered_on, store)
+       values ($1,$2,50000,current_date,'Whitefield')
+       on conflict (md_enq_id) do nothing`, [refId, enq])
+    await c.query(`update referral_order set approval_status='approved', approved_at=now() where md_enq_id=$1`, [enq])
+
+    // Exactly the shape PostgREST generates for the route's upsert: the columns
+    // the payload carries, and no others.
+    await c.query(
+      `insert into referral_order (referral_id, md_enq_id, order_value, ordered_on, store, status, synced_at)
+       values ($1,$2,50000,current_date,'Whitefield','Delivered',now())
+       on conflict (md_enq_id) do update set
+         referral_id = excluded.referral_id, order_value = excluded.order_value,
+         ordered_on = excluded.ordered_on, store = excluded.store,
+         status = excluded.status, synced_at = excluded.synced_at`, [refId, enq])
+
+    const { rows } = await c.query(`select approval_status, store, ordered_on from referral_order where md_enq_id=$1`, [enq])
+    check('a re-sync leaves an approved order approved', rows[0].approval_status === 'approved', rows[0].approval_status)
+    check('and does not blank the columns it did not send', rows[0].store === 'Whitefield' && rows[0].ordered_on !== null)
+
+    // The other direction matters just as much: a sync must not be able to
+    // approve anything by arriving.
+    const fresh = 'ENQRESYNC000002'
+    await c.query(
+      `insert into referral_order (referral_id, md_enq_id, order_value) values ($1,$2,9999)
+       on conflict (md_enq_id) do nothing`, [refId, fresh])
+    const { rows: f } = await c.query(`select approval_status from referral_order where md_enq_id=$1`, [fresh])
+    check('a newly synced order arrives pending, counting towards nothing', f[0].approval_status === 'pending', f[0].approval_status)
+
+    await c.query(`delete from referral_order where md_enq_id in ($1,$2)`, [enq, fresh])
+  }
 
   console.log(`\n${pass} passed, ${fail} failed`)
   await c.end()

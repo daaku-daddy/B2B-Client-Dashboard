@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { supabaseService } from '@/lib/supabase/server'
+import { recordUnlockedTiers } from '@/lib/data/unlock'
 import { phone10 } from '@/lib/format'
 
 /**
@@ -25,6 +26,16 @@ import { phone10 } from '@/lib/format'
  *    referral, matches none, or matches more than one. The third is NOT folded
  *    into the second: it is reported as `ambiguous` and skipped, because
  *    attributing an order to the wrong architect pays the wrong person.
+ *
+ * An order written here lands as `approval_status = 'pending'` and counts
+ * towards NOTHING until a Material Depot admin verifies it in the console. So
+ * `tiers_unlocked` will normally be empty on a sync: a tier is crossed at
+ * approval, not at arrival. The call is still made, because a re-sync that
+ * corrects an already-approved order's value upward can cross one.
+ *
+ * The upsert deliberately does not carry `approval_status`. An absent column is
+ * left alone on an existing row, so a nightly re-sync cannot reset an order an
+ * admin has already decided on — and cannot approve one either.
  */
 
 type IncomingEvent = {
@@ -218,52 +229,4 @@ export async function POST(req: Request) {
     // because nobody had referred those phones is the failure this names.
     skipped,
   })
-}
-
-/**
- * Whether a tier is unlocked is DERIVED from the orders, everywhere it is
- * displayed. This only records the moment it happened, so the partner can be
- * told "you earned this on the 9th" and so a handover has a row to hang off.
- * It never deletes a claim: a corrected order value that drops a partner back
- * below a threshold does not un-give a gold coin.
- */
-async function recordUnlockedTiers(
-  db: ReturnType<typeof supabaseService>,
-  partnerIds: string[],
-) {
-  if (!partnerIds.length) return []
-
-  const { data: tiers } = await db.from('reward_tier').select('id, threshold').eq('active', true)
-  if (!tiers?.length) return []
-
-  const out: { partner_id: string; tier_id: number }[] = []
-  for (const partnerId of partnerIds) {
-    const { data: refs } = await db.from('referral').select('id').eq('partner_id', partnerId)
-    const ids = (refs ?? []).map((r) => r.id)
-    if (!ids.length) continue
-
-    const { data: ords } = await db.from('referral_order').select('order_value').in('referral_id', ids)
-    const total = (ords ?? []).reduce((s, o) => s + (Number(o.order_value) || 0), 0)
-
-    const due = tiers.filter((t) => total >= Number(t.threshold))
-    if (!due.length) continue
-
-    // Only report tiers crossed BY THIS SYNC. An upsert with ignoreDuplicates
-    // writes the right rows either way, but it cannot say which were new — so
-    // reporting `due` made every nightly run claim the partner had just earned
-    // every tier they had ever earned. Anything hung off this field (an email,
-    // a push) would have fired again every night.
-    const { data: already, error: readErr } = await db
-      .from('reward_claim').select('tier_id').eq('partner_id', partnerId)
-    if (readErr) continue
-    const have = new Set((already ?? []).map((r) => r.tier_id as number))
-    const fresh = due.filter((t) => !have.has(t.id))
-    if (!fresh.length) continue
-
-    const { error } = await db.from('reward_claim').insert(
-      fresh.map((t) => ({ partner_id: partnerId, tier_id: t.id, status: 'unlocked' as const })),
-    )
-    if (!error) fresh.forEach((t) => out.push({ partner_id: partnerId, tier_id: t.id }))
-  }
-  return out
 }

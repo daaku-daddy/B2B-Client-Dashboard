@@ -71,12 +71,46 @@ Every skip comes back in the response, with a reason
 forty orders because nobody had referred those phones is the failure that
 reporting exists to prevent.
 
+### An order arrives PENDING and counts towards nothing
+
+`referral_order.approval_status` defaults to `pending`. A Material Depot admin
+verifies each one in `/console/approvals`, and only an `approved` order is in
+the figure the reward ladder is computed from — `attributedSale()` in
+`lib/domain/rewards.ts` filters on it and is the only function allowed to total
+that money.
+
+Money is handed over on the strength of that number, so it gets a human. An order
+attributed to the wrong architect, or a duplicate, would otherwise have already
+bought somebody a gold coin by the time anyone noticed — and a `reward_claim` row,
+once written, is never deleted.
+
+The upsert here deliberately does **not** carry `approval_status`. An absent
+column is left alone on an existing row, so a nightly re-sync can neither reset a
+decision an admin has already made nor grant one. Asserted in
+`supabase/test/rlstest.js` group 14, both directions.
+
+`referral_order` has no UPDATE policy for anybody, admins included. The only
+thing that moves the column is `review_referral_order()`, a SECURITY DEFINER
+function that re-checks `app_is_admin()` itself — so a mistake in app-layer role
+checking is not enough to approve a payout. Group 10 checks that a partner and a
+KAM are both refused.
+
+The partner sees the pending order, labelled "Being checked", with its value
+shown but greyed and excluded from the total. A figure that quietly omits their
+newest order with no explanation is one they assume is wrong.
+
 ### It also records tier unlocks
 
-After writing orders, `recordUnlockedTiers()` recomputes each touched partner's
-attributed total and inserts a `reward_claim` row for each threshold crossed. It
-never deletes a claim — a corrected order value that drops a partner back below
-a threshold does not un-give a gold coin.
+`recordUnlockedTiers()` (`lib/data/unlock.ts`, shared with the console) recomputes
+each touched partner's **approved** total and inserts a `reward_claim` row for
+each threshold crossed. It never deletes a claim — a corrected order value that
+drops a partner back below a threshold does not un-give a gold coin.
+
+Because orders now arrive pending, a sync normally crosses nothing and
+`tiers_unlocked` comes back empty. It is still called: a re-sync that corrects an
+already-approved order's value upward can cross a tier. The real caller is now
+`reviewOrder()` in `lib/data/console-actions.ts`, which runs it the moment an
+admin approves.
 
 **`tiers_unlocked` in the response means "crossed by THIS sync", not "earned".**
 That distinction cost a bug: the first version upserted with `ignoreDuplicates`

@@ -16,6 +16,13 @@ enough that changing it is expensive.
 | 8 | Who confirms a reward was handed over? | Material Depot, not the partner. `reward_claim` has no partner write policy — the UI says "your Material Depot contact will arrange the handover". |
 | 9 | Can a partner add colleagues? | Not self-serve. `partner_user` has no insert policy; `onboard_partner()` refuses a second firm on the same phone and says to ask Material Depot. |
 | 10 | Wastage default | 0%, set per item. A silent default of 5–10% would inflate quotes in a way nobody asked for. |
+| 11 | Do partners get the project workspace on day one? | **No.** `partner.workspace_enabled` defaults to false and an admin turns it on per firm. The brief was explicit that designers are wary of moving their workflow into a supplier's portal, and a nav full of modules nobody asked for is what makes that worse. Nothing is deleted — `docs/roles.md`. |
+| 12 | Does a referred order count as soon as it syncs? | **No.** It arrives `pending` and an admin verifies it. Overruling this is one line in `attributedSale()`, but the claim rows it would write are never deleted, so it is cheap to keep and expensive to undo. |
+| 13 | Who verifies an order — anyone on the B2B team, or only an admin? | Only an admin, enforced inside Postgres by `review_referral_order()`. A KAM verifying their own firms' orders is the one person with a reason not to look hard. |
+| 14 | How are credentials delivered? | Generated on approval and **shown once** to the admin, who sends them. There is no mail transport on this deployment; `auth.admin.inviteUserByEmail()` is the swap once Supabase SMTP is configured — `docs/onboarding.md`. |
+| 15 | How long before a firm "needs reactivating"? | 90 days with no verified order — `DORMANT_AFTER_DAYS`. The brief said three months. "Never ordered" is kept as a separate third state, not folded into dormant. |
+| 16 | What does the inbound manager's flow look like? | **Unanswered.** Inbound currently gets the same prospect pipeline as outreach, with no market restriction. The brief named the role and not the flow, so this is a placeholder that works rather than a design. |
+| 17 | Can one firm have several logins? | Still not self-serve — `partner_user` has no insert policy. An admin can now issue a *replacement* password from the console, which covers the case that actually came up (a firm that cannot get in), but not a second seat. |
 
 ## Known gaps, named rather than faked
 
@@ -42,6 +49,19 @@ enough that changing it is expensive.
 - **No client-facing view.** An architect can export the quote PDF; there is no
   link a client can open to approve a board themselves. That is the obvious next
   module and needs a share-token table.
+- **Nothing renders the published portfolios.** This app holds the submissions
+  and the review state. Whatever builds the partners page on materialdepot.com
+  reads `portfolio_item where status = 'published'`; that consumer does not exist
+  yet — `docs/portfolio.md`.
+- **No email, anywhere.** Credentials are shown once to an admin to send by hand,
+  and nothing notifies a partner when an order is verified or a project is
+  published — they see it in their account history next time they look. Both are
+  named in the UI rather than faked.
+- **The CRM does not know about any of this yet.** `partner.md_client_id` exists
+  and is unique, ready for the bridge in `materialdepot-crm`
+  `docs/b2b/partner-bridge.md`, and nothing sets it. The 26 architect and
+  interior-design firms the CRM already holds still have to be onboarded through
+  the form by hand.
 - **No image upload.** `board.cover_url` and `board_item.image_url` accept URLs;
   nothing uploads to Supabase Storage yet, so covers only appear for catalogue
   products.

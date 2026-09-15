@@ -3,7 +3,7 @@ import { listClients, listReferralEvents, listReferralOrders, listReferrals, lis
 import { ReferralsView } from '@/components/referrals/ReferralsView'
 import { PageHead } from '@/components/shell/PageHead'
 import { Problem, Stat } from '@/components/ui'
-import { rewardStatus } from '@/lib/domain/rewards'
+import { attributedSale, pendingSale, rewardStatus } from '@/lib/domain/rewards'
 import { inr, inrShort } from '@/lib/format'
 
 export default async function ReferralsPage() {
@@ -23,13 +23,15 @@ export default async function ReferralsPage() {
   const ids = referrals.data.map((r) => r.id)
   const [events, orders] = await Promise.all([listReferralEvents(ids, 500), listReferralOrders(ids)])
 
-  const attributed = orders.ok ? orders.data.reduce((s, o) => s + Number(o.order_value || 0), 0) : 0
+  // Approved only, everywhere. See lib/domain/rewards.ts.
+  const attributed = orders.ok ? attributedSale(orders.data) : 0
+  const waiting = orders.ok ? pendingSale(orders.data) : { count: 0, value: 0 }
   const status = rewardStatus(attributed, tiers.ok ? tiers.data : [], claims.ok ? claims.data : [])
 
   return (
     <>
       <PageHead
-        title="Referrals"
+        title="Your clients"
         hint="Clients you have sent to Material Depot. You see what they saw, what is in their cart, and what they ordered."
       />
       <div className="space-y-5 px-4 py-5 md:px-6">
@@ -37,7 +39,16 @@ export default async function ReferralsPage() {
 
         <div className="grid gap-3 sm:grid-cols-3">
           <Stat label="Referred clients" value={referrals.data.length} hint={`${orders.ok ? orders.data.length : 0} orders between them`} />
-          <Stat label="Business sent our way" value={inr(attributed)} hint="Lifetime, across every referral" tone="good" />
+          <Stat
+            label="Business sent our way"
+            value={inr(attributed)}
+            hint={
+              waiting.count
+                ? `Verified. ${inrShort(waiting.value)} more is still being checked by us.`
+                : 'Lifetime, across every referral'
+            }
+            tone="good"
+          />
           <Stat
             label="Next reward needs"
             value={status.next ? inrShort(status.next.remaining) : 'All earned'}

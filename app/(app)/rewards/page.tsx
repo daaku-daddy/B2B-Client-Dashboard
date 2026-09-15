@@ -1,6 +1,7 @@
 import { listReferralOrders, listReferrals, listRewardClaims, listRewardTiers } from '@/lib/data/queries'
-import { rewardStatus } from '@/lib/domain/rewards'
+import { attributedSale, pendingSale, rewardStatus } from '@/lib/domain/rewards'
 import { RewardTrack } from '@/components/rewards/RewardTrack'
+import { OrderApprovalBadge } from '@/components/referrals/OrderApproval'
 import { PageHead } from '@/components/shell/PageHead'
 import { Card, CardHead, Empty, Problem, Stat, Table, Td, Th } from '@/components/ui'
 import { date, inr } from '@/lib/format'
@@ -19,7 +20,8 @@ export default async function RewardsPage() {
   const orders = await listReferralOrders(referrals.data.map((r) => r.id))
   if (!orders.ok) return <Shell><Problem title="Could not load referred orders" detail={orders.error} /></Shell>
 
-  const attributed = orders.data.reduce((s, o) => s + Number(o.order_value || 0), 0)
+  const attributed = attributedSale(orders.data)
+  const waiting = pendingSale(orders.data)
   const status = rewardStatus(attributed, tiers.data, claims.data)
   const refName = new Map(referrals.data.map((r) => [r.id, r.client_name]))
 
@@ -33,9 +35,14 @@ export default async function RewardsPage() {
           tone="brand"
         />
         <Stat
-          label="Referred orders"
-          value={orders.data.length}
-          hint={`across ${referrals.data.length} referred client${referrals.data.length === 1 ? '' : 's'}`}
+          label="Counting towards this"
+          value={inr(attributed)}
+          hint={
+            waiting.count
+              ? `${orders.data.length} order${orders.data.length === 1 ? '' : 's'} · ${inr(waiting.value)} still being checked`
+              : `${orders.data.length} order${orders.data.length === 1 ? '' : 's'} across ${referrals.data.length} client${referrals.data.length === 1 ? '' : 's'}`
+          }
+          tone="good"
         />
         <Stat
           label="Next milestone needs"
@@ -51,7 +58,7 @@ export default async function RewardsPage() {
       <Card className="mt-5">
         <CardHead
           title="What counts towards this"
-          hint="Every order your referred clients placed with Material Depot. Counted once per order — re-syncing cannot inflate it."
+          hint="Every order your referred clients placed with us. Counted once per order — and only once we have verified it, which is usually a day or two after it is placed."
         />
         {orders.data.length === 0 ? (
           <Empty
@@ -66,17 +73,23 @@ export default async function RewardsPage() {
                 <Th>Client</Th>
                 <Th>Store</Th>
                 <Th>Placed</Th>
+                <Th>Counting?</Th>
                 <Th className="text-right">Value</Th>
               </tr>
             </thead>
             <tbody>
               {orders.data.map((o) => (
                 <tr key={o.id}>
-                  <Td className="font-mono text-xs">{o.md_enq_id}</Td>
+                  <Td className="font-mono text-xs" title={o.md_enq_id}>{o.md_enq_id}</Td>
                   <Td>{refName.get(o.referral_id) ?? '—'}</Td>
                   <Td className="text-ink-soft">{o.store ?? '—'}</Td>
                   <Td className="text-ink-soft">{date(o.ordered_on)}</Td>
-                  <Td className="tnum text-right font-medium">{inr(o.order_value)}</Td>
+                  <Td><OrderApprovalBadge status={o.approval_status} /></Td>
+                  <Td
+                    className={`tnum text-right font-medium ${o.approval_status === 'approved' ? '' : 'text-ink-faint'}`}
+                  >
+                    {inr(o.order_value)}
+                  </Td>
                 </tr>
               ))}
             </tbody>

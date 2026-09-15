@@ -24,8 +24,14 @@ export async function supabaseServer() {
 }
 
 /**
- * Service-role client. Bypasses RLS — only ever call this from a route handler,
- * never from anything that renders.
+ * Service-role client. Bypasses RLS — only ever call this from a route handler
+ * or a server action, never from anything that renders.
+ *
+ * Two things need it. The referral sync writes tables partners can only read.
+ * Provisioning creates an auth user, a partner row and the link between them in
+ * one go, which no signed-in user has the rights to do — and every caller that
+ * reaches for it checks `requireStaff(['admin'])` FIRST. There is no path here
+ * that takes an id from a form and trusts it.
  *
  * Throws rather than falling back to the anon key: the tables this is for
  * (`referral_event`, `referral_order`, `reward_claim`) have RLS on with no

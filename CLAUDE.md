@@ -1,8 +1,15 @@
 # b2b-client-dashboard
 
-**Material Depot for Partners** — the workspace architects and interior
-designers run their projects in: design boards, quotes, procurement, project
-finances, and visibility of the clients they refer to Material Depot.
+**Material Depot for Partners** — two apps on one deployment.
+
+`app/(app)/**` is what an architect or interior designer sees: the clients they
+referred to us and what those clients did, their reward ladder, and their
+portfolio. Behind a per-firm flag there is also a full project workspace —
+design boards, quotes, procurement, project finances — **off by default**.
+
+`app/(console)/**` is Material Depot's own B2B team: an admin who verifies
+orders and issues logins, KAMs, outreach and inbound managers. Read
+`docs/roles.md` before touching either.
 
 Next.js 16 (App Router, Turbopack) + Tailwind 4 + Supabase. Deployed on Vercel
 at <https://b2b-client-dashboard-eight.vercel.app/>.
@@ -17,15 +24,17 @@ and must stay that way.
 npm run dev        # next dev — NOTE: :3000 is usually the materialdepot-crm
                    #  dev server, so this lands on :3001. Read the log line.
 npm run build      # next build
-npm run typecheck  # tsc --noEmit
+npm run typecheck   # tsc --noEmit
+npm run test:domain # the pure rules, run directly — no bundler, no database
 
 cd supabase/test && npm install && npm run all   # the SQL + RLS suite
 ```
 
-There is no lint command. The gate is `npm run typecheck`, `npm run build`, and
-— for anything touching `supabase/` — the suite in `supabase/test`, which runs
-the migrations and the seed against a throwaway Postgres 18 and asserts 51
-things about RLS. **Run all three before claiming a change works.**
+There is no lint command. The gate is `npm run typecheck`, `npm run build`,
+`npm run test:domain`, and — for anything touching `supabase/` — the suite in
+`supabase/test`, which runs the migrations and both seeds against a throwaway
+Postgres 18 and asserts **108** things about RLS. **Run all four before claiming
+a change works.**
 
 And then look at it. Every one of the six bugs in `docs/landmines.md` passed
 `tsc` and `build`; five of them were found by signing in as the demo firm and
@@ -42,9 +51,13 @@ one is.
 
 **A migration committed here is not evidence it was applied.** If a column is
 missing at runtime, check the live table before assuming the code is wrong. And
-before handing anyone SQL to paste, run it through `supabase/test` — two of the
-six entries in `docs/landmines.md` are seed bugs that would otherwise have died
-a third of the way through someone's paste.
+before handing anyone SQL to paste, run it through `supabase/test` — three of the
+eight entries in `docs/landmines.md` are seed or migration bugs that would
+otherwise have died a third of the way through someone's paste.
+
+**SQL first, then deploy.** `currentActor()` reads `staff_user` on every page, so
+a deploy that lands before `003`/`004` have been pasted shows every partner "We
+could not load your workspace" until somebody notices.
 
 Demo login, once the seed is in: `demo.studio@materialdepot.com` /
 `DemoStudio2026!`. This Supabase project has **email confirmation ON**, so a
@@ -56,21 +69,26 @@ one address for you.
 | Path | What it is |
 |---|---|
 | `proxy.ts` | Session refresh + the signed-out redirect. Next 16's `proxy` convention, not the deprecated `middleware`. |
-| `app/(app)/**` | Every signed-in page. `layout.tsx` resolves the partner and gates onboarding. |
+| `app/(app)/**` | The partner app. `layout.tsx` resolves the firm, bounces staff to the console, gates onboarding. |
+| `app/(console)/**` | Material Depot's B2B console. `layout.tsx` bounces partners back to their own app. |
 | `app/login` | Email + password. Phone-OTP is the intended production login — see `docs/auth.md`. |
 | `app/api/catalog/search` | Server proxy to Material Depot's catalogue. **Blocked today by Cloudflare, with Django CSRF behind it** — `docs/catalogue.md`. |
 | `app/api/sync/referrals` | Push endpoint for referral events and orders. Service-role, shared-secret. |
-| `lib/domain/**` | The rules: money, quantity, areas, rewards, project stages. No I/O in here. |
-| `lib/data/**` | Reads (`queries.ts`), writes (`actions.ts`), the `Result` type, the session. |
-| `components/**` | `ui/` primitives, then one folder per module. |
+| `lib/domain/**` | The rules: money, quantity, areas, rewards, markets, the internal tiering. No I/O in here. |
+| `lib/data/**` | Partner reads/writes (`queries.ts`, `actions.ts`), console reads/writes (`console-*.ts`), the `Result` type, the session and the role gates. |
+| `lib/auth/credentials.ts` | The one-time password generator. Never stored, never logged. |
+| `components/**` | `ui/` primitives, then one folder per module. `console/` is staff-only and must never be imported from `app/(app)/`. |
+| `test/domain.test.ts` | The pure rules, asserted at their boundaries. `npm run test:domain`. |
 | `supabase/migrations/**` | The schema and the RLS policies. Pasted by hand. |
 | `supabase/seed/001_demo.sql` | A whole demo firm — 5 projects, boards, quotes, procurement, ledger, referrals, rewards. Idempotent. |
-| `supabase/test/**` | Migrations + seed + 51 RLS assertions against a throwaway Postgres. Its deps are deliberately outside the app's `package.json`. |
+| `supabase/seed/002_console.sql` | The demo B2B team, two more firms, prospects, onboarding forms, portfolios, activity. |
+| `supabase/test/**` | Migrations + seeds + 108 RLS assertions against a throwaway Postgres. Its deps are deliberately outside the app's `package.json`. |
 
 ## House rules
 
-Five conventions carry most of the weight. Breaking one is how this app would
-start lying to an architect about their own money.
+Seven conventions carry most of the weight. Breaking one is how this app would
+start lying to an architect about their own money — or show their margins to a
+supplier.
 
 ### 1. A failure is never an empty list
 
@@ -114,12 +132,37 @@ An upsert writes every column in its payload, so building a row with
 Payload-shaped writes go through a `defined()` filter that drops `undefined`
 keys; an explicit `null` still clears. This one shipped — `docs/landmines.md`.
 
+### 6. Material Depot staff see the relationship, never the work
+
+No policy anywhere lets staff read `client`, `project`, `project_area`, `board`,
+`board_item`, `quote`, `quote_line`, `procurement_item` or `finance_entry`. A
+KAM can see which clients a firm referred to us and what those clients bought
+from us; they cannot see that firm's own client list, its quotes or its margins.
+
+That is the only reason a designer would put their pricing in a supplier's
+portal, and a "just for support" read policy on any one of those tables would
+throw it away. `supabase/test/rlstest.js` group 8 checks all nine by name.
+
+### 7. The money gate lives in the database
+
+Only an `approved` order counts towards a partner's rewards, and
+`referral_order` has **no UPDATE policy for anybody**. The single thing that can
+change that column is `review_referral_order()`, which re-checks
+`app_is_admin()` inside Postgres. Same for publishing a portfolio piece.
+
+App-layer role checks (`requireStaff`) are there so the UI can be honest, not so
+the database can be trusted to a form field. A bug in one must not be enough to
+hand somebody a gold coin.
+
 ## Docs
 
 Module detail lives in `docs/`, read on demand:
 
 | Doc | Holds |
 |---|---|
+| `docs/roles.md` | **The three kinds of user, the console, market segregation, and the trust boundary. Start here.** |
+| `docs/onboarding.md` | Outreach → the form → admin verification → credentials; the internal Power/Mid/Basic classification |
+| `docs/portfolio.md` | Partner portfolios and the publish gate |
 | `docs/auth.md` | The login model, `onboard_partner`, why not phone OTP yet |
 | `docs/catalogue.md` | The Material Depot search API, its field names, and the CSRF wall |
 | `docs/design.md` | Rooms, boards, the palette link, how quantities are worked out |

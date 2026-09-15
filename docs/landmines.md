@@ -94,3 +94,49 @@ arrived, not that it is a picture. Check the byte size.
 Second lesson from the same bug: a JPEG page screenshot can be captured before
 images paint even when `complete` is `true`. Zoom into the region before
 concluding an image is broken.
+
+---
+
+## 2026-09-15 · A guard trigger locked the SQL Editor out of its own table
+
+`partner_guard_md_fields()` refuses a non-admin's change to the columns Material
+Depot owns, and decided "non-admin" with `app_is_admin()` alone. The service role
+and the SQL Editor have no `auth.uid()`, so `app_is_admin()` is false for them —
+and `seed/002_console.sql` died on `42501 that field is set by Material Depot,
+not by the firm` while trying to set the demo firm's own market.
+
+*From the user's side:* a seed file that runs fine as far as section 2 and then
+stops, with an error that reads like a permissions misconfiguration.
+
+The guard now passes anything through when `auth.uid() is null`. That is safe
+because every signed-in route into the table is a policy that is `to
+authenticated` and needs a uid, so a null uid cannot be a partner.
+
+**The shape:** a trigger written in terms of "is this user allowed" when the
+thing doing the writing is not a user at all. RLS has `service_role bypassrls`;
+triggers have no such thing and fire for everybody. Any `SECURITY DEFINER` guard
+needs an explicit answer for "there is no caller".
+
+---
+
+## 2026-09-15 · Three RLS assertions passed by not testing anything
+
+New tests, caught before they were trusted, but the shape is worth keeping:
+
+- `update partner set workspace_enabled = true` to prove a firm *cannot* — the
+  demo firm already had it `true`, `is distinct from` was false, and the guard
+  let the no-op through. The test reported "IT WENT THROUGH" on a guard that
+  works. Now `not workspace_enabled`.
+- Setting a portfolio item to `submitted` and *then* trying to publish it — the
+  `using` clause rejected the second update for 0 rows, which the harness read as
+  blocked. It was, but by the wrong clause; `with check` on the status was never
+  exercised. Now the publish attempt runs first, on a genuine draft.
+- Counting partner rows to prove market scoping, when the suite's own fixture
+  firm has `market = null` and is *deliberately* visible to everyone. Correct
+  behaviour read as a leak. Now asserted by id.
+
+**The shape:** an expected-failure test that would also pass if the thing under
+test did nothing. Three separate ways to get it — writing the value that is
+already there, tripping an earlier guard than the one you mean, and counting
+rows when a documented exception is in the count. Make the write a real change,
+assert the specific refusal, and name the rows.
