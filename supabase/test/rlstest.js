@@ -327,6 +327,47 @@ async function asUser(c, uid, fn) {
     await c.query(`delete from referral_order where md_enq_id in ($1,$2)`, [enq, fresh])
   }
 
+  console.log('\n15. Everything the firm-view page reads — and nothing more')
+  // `/console/partners/[id]/dashboard` shows a firm its own dashboard back. It
+  // added no policy: these are the eight tables it reads, asserted to be
+  // readable by an admin for a firm they do not personally manage, and NOT
+  // readable by a staff member out of market. If a future migration narrows one
+  // of these, that page half-loads with a <Problem> rather than lying — but it
+  // is cheaper to find out here.
+  const VIEW_TABLES = ['partner','referral','referral_order','referral_event',
+                       'reward_tier','reward_claim','partner_activity','portfolio_item']
+  const forFirm = {
+    partner:           ['select count(*)::int n from partner where id = $1'],
+    referral:          ['select count(*)::int n from referral where partner_id = $1'],
+    referral_order:    ['select count(*)::int n from referral_order o join referral r on r.id = o.referral_id where r.partner_id = $1'],
+    referral_event:    ['select count(*)::int n from referral_event e join referral r on r.id = e.referral_id where r.partner_id = $1'],
+    // The ladder is not per-firm; the cast is only so the shared $1 binds.
+    reward_tier:       ['select count(*)::int n from reward_tier where active and $1::uuid is not null'],
+    reward_claim:      ['select count(*)::int n from reward_claim where partner_id = $1'],
+    partner_activity:  ['select count(*)::int n from partner_activity where partner_id = $1'],
+    portfolio_item:    ['select count(*)::int n from portfolio_item where partner_id = $1'],
+  }
+  await asUser(c, ADMIN_UID, async () => {
+    for (const t of VIEW_TABLES) {
+      check(`admin can read ${t} for a firm they do not manage`,
+        (await count(forFirm[t][0], [TERRA])) > 0)
+    }
+    // The page filters this itself. If RLS ever did the filtering for staff too,
+    // the "N internal rows are hidden from them" line would silently read 0 and
+    // an admin would think a firm can see a KAM's private notes.
+    check('and sees the internal history rows the firm cannot',
+      (await count('select count(*)::int n from partner_activity where partner_id = $1 and not visible_to_partner', [TERRA])) > 0)
+    for (const t of PRIVATE_TABLES) {
+      check(`...and still nothing in ${t}`, (await count(`select count(*)::int n from ${t}`)) === 0)
+    }
+  })
+  await asUser(c, KAM_HYD_UID, async () => {
+    for (const t of ['referral','referral_order','referral_event','reward_claim','partner_activity','portfolio_item']) {
+      check(`a Hyderabad KAM reads no ${t} for a Bangalore firm`,
+        (await count(forFirm[t][0], [TERRA])) === 0)
+    }
+  })
+
   console.log(`\n${pass} passed, ${fail} failed`)
   await c.end()
   process.exit(fail ? 1 : 0)

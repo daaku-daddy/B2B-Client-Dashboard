@@ -103,6 +103,27 @@ t('a null market reads as every market', () => assert.equal(marketLabel(null), '
 t('an unknown market key is shown as itself rather than swallowed', () =>
   assert.equal(marketLabel('chennai'), 'chennai'))
 
+console.log('\n"All earned" and "there is no ladder" are different answers')
+{
+  const tier = (id: number, threshold: number) =>
+    ({ id, threshold, label: `T${id}`, kind: 'silver', detail: null, active: true }) as any
+  const none = rewardStatus(500000, [], [])
+  t('an empty ladder is not a completed one', () => {
+    assert.equal(none.next, null)
+    assert.equal(none.complete, false)
+  })
+  const done = rewardStatus(500000, [tier(1, 100000), tier(2, 250000)], [])
+  t('clearing every tier is', () => {
+    assert.equal(done.next, null)
+    assert.equal(done.complete, true)
+  })
+  const mid = rewardStatus(150000, [tier(1, 100000), tier(2, 250000)], [])
+  t('and a ladder with something left to chase is neither', () => {
+    assert.equal(mid.next?.tier.id, 2)
+    assert.equal(mid.complete, false)
+  })
+}
+
 console.log('\nOne-time passwords')
 t('no characters that can be misread aloud', () => {
   for (let i = 0; i < 400; i++) assert.ok(!/[Il1O0]/.test(generatePassword()))

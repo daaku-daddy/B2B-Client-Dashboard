@@ -51,7 +51,7 @@ export default async function ReferralsPage() {
           />
           <Stat
             label="Next reward needs"
-            value={status.next ? inrShort(status.next.remaining) : 'All earned'}
+            value={status.next ? inrShort(status.next.remaining) : status.complete ? 'All earned' : '—'}
             hint={
               status.next ? (
                 <>

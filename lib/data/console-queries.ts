@@ -2,7 +2,7 @@ import { supabaseServer } from '@/lib/supabase/server'
 import { fail, ok, type Result } from './result'
 import type {
   OutreachProspect, OutreachTouch, Partner, PartnerActivity, PartnerApplication,
-  PortfolioItem, Referral, ReferralOrder, RewardClaim, StaffUser,
+  PortfolioItem, Referral, ReferralEvent, ReferralOrder, RewardClaim, StaffUser,
 } from '@/lib/domain/types'
 
 /**
@@ -106,6 +106,32 @@ export const listActivityFor = (partnerId: string, limit = 60) =>
       sb.from('partner_activity').select('*').eq('partner_id', partnerId)
         .order('occurred_at', { ascending: false }).limit(limit),
     'this firm’s history',
+  )
+
+/**
+ * What this firm's referred clients have been doing at Material Depot — store
+ * visits, carts, quotes, orders.
+ *
+ * Staff have had a read policy on `referral_event` since 004
+ * (`referral_event_staff_read`); nothing in the console showed it until the
+ * firm-view page. It is the same timeline the partner sees on their own
+ * dashboard, which is the point: a KAM ringing a firm about a quiet month
+ * should be looking at the screen that firm is looking at.
+ */
+export const listEventsFor = (referralIds: string[], limit = 200) =>
+  referralIds.length
+    ? many<ReferralEvent>(
+        (sb) =>
+          sb.from('referral_event').select('*').in('referral_id', referralIds)
+            .order('occurred_at', { ascending: false }).limit(limit),
+        'what this firm’s clients have been doing',
+      )
+    : Promise.resolve(ok<ReferralEvent[]>([]))
+
+export const listPortfolioFor = (partnerId: string) =>
+  many<PortfolioItem>(
+    (sb) => sb.from('portfolio_item').select('*').eq('partner_id', partnerId).order('sort_order'),
+    'this firm’s portfolio',
   )
 
 // ---------------------------------------------------------- applications

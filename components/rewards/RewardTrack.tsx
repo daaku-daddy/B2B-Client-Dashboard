@@ -33,8 +33,10 @@ export function RewardTrack({ status, compact = false }: { status: RewardStatus;
                 {TIER_ICON[next.tier.kind]} {next.tier.label}
               </p>
             </div>
-          ) : (
+          ) : status.complete ? (
             <Badge tone="good">Every milestone earned 🎉</Badge>
+          ) : (
+            <Badge tone="warn">No ladder configured</Badge>
           )}
         </div>
 

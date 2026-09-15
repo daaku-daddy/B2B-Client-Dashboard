@@ -1,6 +1,6 @@
 # Bugs already shipped here
 
-Six, in this repo's first two days. Kept because the **shape** of each one
+Eleven, in this repo's first five days. Kept because the **shape** of each one
 recurs, and because every one of them passed `tsc` and `next build` first.
 
 Add to this file when you fix a bug whose shape could come back. Date it, and
@@ -201,8 +201,8 @@ Functions cannot be passed directly to Client Components
 occurred" on **every page of both apps**. Not the console alone: the partner app
 took the same prop and broke identically.
 
-`npm run typecheck`, `npm run build`, 108 RLS assertions and 29 domain
-assertions all passed, and so did every data query when probed directly with a
+`npm run typecheck`, `npm run build`, every RLS assertion and every domain
+assertion all passed, and so did every data query when probed directly with a
 real user's JWT. Nothing but loading the page in a browser found it.
 
 The fix: `Sidebar` takes `nav={{ kind: 'partner', workspaceEnabled }}` or
@@ -218,3 +218,30 @@ fails on first render.
 Second lesson, and the one worth keeping: the deploy went green, the data layer
 verified clean from the command line, and the app was still completely broken.
 `docs/landmines.md` keeps saying "and then look at it" — this is why.
+
+---
+
+## 2026-09-15 · "All earned 🎉" was what an empty ladder looked like
+
+`rewardStatus()` returned `next: null` for two completely different situations —
+a partner who has cleared every milestone, and a `reward_tier` table that came
+back empty because the read of it failed. Four call sites read that one null as
+the first: the partner dashboard, the referrals page, `RewardTrack`'s headline
+badge and the new firm-view page all said **All earned / Every milestone
+unlocked / Every milestone earned 🎉**.
+
+*From the user's side:* an architect who has referred nothing opens their
+dashboard and is congratulated on completing an incentive scheme they have not
+started. The `<Problem>` banner about the failed read is on the same screen,
+above it, saying the opposite.
+
+`RewardStatus` now carries `complete` — every tier earned **and** there was at
+least one to earn — and every call site reads
+`complete ? 'All earned' : next ? … : '—'`.
+
+**The shape:** house rule 1 one level down. "A failure is never an empty list"
+was obeyed at the data layer — the read returned `Result` and the page rendered
+`<Problem>` — and then the empty list was fed into a derived value where absence
+and completion collapse into the same sentinel. Any `find() ?? null` whose null
+answers two questions. Found by rendering the component against a fixture with
+no tiers, which took two minutes and is the only reason it was not shipped.

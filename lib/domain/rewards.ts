@@ -56,8 +56,19 @@ export type RewardStatus = {
   attributedSale: number
   tiers: TierProgress[]
   earned: TierProgress[]
-  /** the next thing to chase, or null once everything is earned */
+  /** the next thing to chase, or null when there is nothing left to chase */
   next: TierProgress | null
+  /**
+   * Every tier earned — and there was at least one to earn.
+   *
+   * `next === null` on its own is ambiguous, and the ambiguity is expensive: an
+   * empty ladder also has no next tier, so "All earned / Every milestone
+   * unlocked" was what a firm saw when `reward_tier` was empty or the read of it
+   * failed. That is the house rule in CLAUDE.md — a failure is never an empty
+   * list — showing up one level further down, as a failure that renders as good
+   * news. Callers say `complete ? 'All earned' : next ? … : '—'`.
+   */
+  complete: boolean
   /** unlocked but not yet marked fulfilled */
   awaitingHandover: TierProgress[]
   fulfilled: TierProgress[]
@@ -95,6 +106,7 @@ export function rewardStatus(
     tiers: rows,
     earned,
     next: rows.find((r) => !r.unlocked) ?? null,
+    complete: rows.length > 0 && rows.every((r) => r.unlocked),
     awaitingHandover: earned.filter((r) => r.claim?.status !== 'fulfilled'),
     fulfilled: earned.filter((r) => r.claim?.status === 'fulfilled'),
     ladderPct: top > 0 ? Math.min(100, Math.round((total / top) * 100)) : 0,

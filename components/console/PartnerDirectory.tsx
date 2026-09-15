@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Search } from 'lucide-react'
+import { Eye, Search } from 'lucide-react'
 import { Badge, Card, CardHead, Empty, Input, Problem, Select, Stat, Table, Td, Th } from '@/components/ui'
 import { EngagementBadge, TierBadge } from './Standing'
 import type { PartnerStanding } from '@/lib/domain/tiering'
@@ -112,11 +112,12 @@ export function PartnerDirectory({ rows, team, error }: { rows: PartnerRow[]; te
         ) : shown.length === 0 ? (
           <Empty title="Nothing matches that" body="Try a different filter." />
         ) : (
-          <Table className="min-w-[860px]">
+          <Table className="min-w-[940px]">
             <thead>
               <tr>
                 <Th>Firm</Th><Th>Market</Th><Th>KAM</Th><Th>Class</Th><Th>Standing</Th>
                 <Th className="text-right">Orders</Th><Th className="text-right">Verified</Th><Th>Last order</Th>
+                <Th><span className="sr-only">Their dashboard</span></Th>
               </tr>
             </thead>
             <tbody>
@@ -148,6 +149,15 @@ export function PartnerDirectory({ rows, team, error }: { rows: PartnerRow[]; te
                   </Td>
                   <Td className="text-xs text-ink-soft">
                     {standing.lastOrderOn ? date(standing.lastOrderOn) : '—'}
+                  </Td>
+                  <Td>
+                    <Link
+                      href={`/console/partners/${partner.id}/dashboard`}
+                      title={`Open ${partner.firm_name}'s own dashboard, read-only`}
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-ink-faint transition hover:text-brand"
+                    >
+                      <Eye size={12} /> Their view
+                    </Link>
                   </Td>
                 </tr>
               ))}

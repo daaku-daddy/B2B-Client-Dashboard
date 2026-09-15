@@ -97,8 +97,14 @@ export default async function DashboardPage() {
           />
           <Stat
             label="Next reward needs"
-            value={status.next ? inr(status.next.remaining) : 'All earned'}
-            hint={status.next ? status.next.tier.label : 'Every milestone unlocked'}
+            value={status.next ? inr(status.next.remaining) : status.complete ? 'All earned' : '—'}
+            hint={
+              status.next
+                ? status.next.tier.label
+                : status.complete
+                  ? 'Every milestone unlocked'
+                  : 'We could not load the ladder'
+            }
           />
         </div>
 

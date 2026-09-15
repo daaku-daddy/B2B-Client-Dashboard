@@ -36,6 +36,48 @@ The same rule going the other way: a partner cannot read `staff_user`,
 KAM's name and number reach them through `my_kam()`, a SECURITY DEFINER function
 that returns exactly one row — theirs.
 
+## Seeing a firm's own dashboard
+
+`/console/partners/[id]/dashboard` shows one firm its own dashboard back, exactly
+as that firm sees it, read-only. It is reached from **Open their dashboard** on
+the firm page and from **Their view** in the Firms directory.
+
+This is the answer to "an admin should be able to see every partner's
+dashboard", and it stays on the right side of the boundary above:
+
+- **It added no policy.** Every table it reads — `partner`, `referral`,
+  `referral_order`, `referral_event`, `reward_tier`, `reward_claim`,
+  `partner_activity`, `portfolio_item` — already had a staff `select` policy
+  from `004_roles_rls.sql`, scoped by `app_staff_sees_partner()`. Nothing was
+  pasted into Supabase for this feature and nothing needs to be.
+- **"Every partner" falls out of the market rule, not out of a new grant.** An
+  admin has `market = null`, so `app_covers_market()` is true for every firm. A
+  KAM opening the same URL for a firm outside their market gets the same 404 the
+  firm page already gives them. That is checked in `rlstest.js` group 15.
+- **The workspace is still not there.** No `client`, `project`, `board`,
+  `quote`, `procurement_item` or `finance_entry` is read, so there is nothing to
+  show for a firm's own projects, prices or margins — with the flag on or off.
+  The page says so in as many words where those modules would have been, rather
+  than stopping silently, because an admin who reads the gap as a broken page
+  goes looking for a bug that is actually the product working.
+
+Three smaller decisions worth knowing:
+
+- **It is not an impersonation.** The page renders under the staff member's own
+  session; no token is swapped and no write action exists on it, so a bug here
+  cannot post anything as the firm.
+- **The numbers come from the partner's own functions** — `attributedSale()`,
+  `pendingSale()`, `rewardStatus()` — never `partnerStanding()`. A support call
+  is somebody reading a screen down the phone, and the figure the admin reads
+  out has to be the figure the architect is looking at. Nothing from
+  `lib/domain/tiering.ts` may be imported into that view for the same reason it
+  may not be imported into the partner app: Power/Mid/Basic is how a KAM plans
+  their week, not something to say to a firm.
+- **History is filtered in the page, not by RLS.** Staff see internal
+  `partner_activity` rows and partners do not, so the view drops them itself and
+  says how many it dropped. The unfiltered history is one click away on the firm
+  page.
+
 ## The four staff roles
 
 | Role | Market | Does |

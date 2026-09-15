@@ -36,7 +36,7 @@ exists` and inflated row counts, not as a clear error.
 
 ## What `rlstest.js` asserts
 
-108 checks, in fourteen groups:
+132 checks, in fifteen groups:
 
 1. The demo partner can read all thirteen of their own tables.
 2. **A second architect reads none of it.** This is the whole reason RLS is on
@@ -75,6 +75,12 @@ exists` and inflated row counts, not as a clear error.
 14. **A re-sync cannot undo an approval** — the exact upsert PostgREST generates
     for `/api/sync/referrals` leaves `approval_status` and the columns it did not
     send alone, and a newly synced order arrives `pending`.
+15. **Everything the firm-view page reads, and nothing more.** The eight tables
+    behind `/console/partners/[id]/dashboard` are asserted readable by an admin
+    for a firm they do not personally manage, unreadable by a KAM in the wrong
+    market, and — in the same breath — still zero rows in all nine private
+    tables. That page added no policy, and this group is what would notice if
+    somebody later added one.
 
 Every expected-failure check is wrapped in a savepoint. Without that, the first
 `42501` aborts the transaction and every later assertion reports `25P02`

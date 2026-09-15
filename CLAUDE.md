@@ -33,12 +33,12 @@ cd supabase/test && npm install && npm run all   # the SQL + RLS suite
 There is no lint command. The gate is `npm run typecheck`, `npm run build`,
 `npm run test:domain`, and — for anything touching `supabase/` — the suite in
 `supabase/test`, which runs the migrations and both seeds against a throwaway
-Postgres 18 and asserts **108** things about RLS. **Run all four before claiming
+Postgres 18 and asserts **132** things about RLS. **Run all four before claiming
 a change works.**
 
-And then look at it. Every one of the six bugs in `docs/landmines.md` passed
-`tsc` and `build`; five of them were found by signing in as the demo firm and
-walking the tabs. `supabase/seed/001_demo.sql` exists so that is a two-minute
+And then look at it. Every one of the eleven bugs in `docs/landmines.md` passed
+`tsc` and `build`; most were found by signing in as the demo firm and walking
+the tabs, or by rendering a component against a fixture. `supabase/seed/001_demo.sql` exists so that is a two-minute
 job rather than an hour of data entry.
 
 ## The one thing to know first
@@ -51,8 +51,8 @@ one is.
 
 **A migration committed here is not evidence it was applied.** If a column is
 missing at runtime, check the live table before assuming the code is wrong. And
-before handing anyone SQL to paste, run it through `supabase/test` — three of the
-eight entries in `docs/landmines.md` are seed or migration bugs that would
+before handing anyone SQL to paste, run it through `supabase/test` — several of
+the entries in `docs/landmines.md` are seed or migration bugs that would
 otherwise have died a third of the way through someone's paste.
 
 **SQL first, then deploy.** `currentActor()` reads `staff_user` on every page, so
@@ -71,6 +71,7 @@ one address for you.
 | `proxy.ts` | Session refresh + the signed-out redirect. Next 16's `proxy` convention, not the deprecated `middleware`. |
 | `app/(app)/**` | The partner app. `layout.tsx` resolves the firm, bounces staff to the console, gates onboarding. |
 | `app/(console)/**` | Material Depot's B2B console. `layout.tsx` bounces partners back to their own app. |
+| `app/(console)/console/partners/[id]/dashboard` | One firm's own dashboard, read-only, for support calls. Adds no policy — `docs/roles.md`. |
 | `app/login` | Email + password. Phone-OTP is the intended production login — see `docs/auth.md`. |
 | `app/api/catalog/search` | Server proxy to Material Depot's catalogue. **Blocked today by Cloudflare, with Django CSRF behind it** — `docs/catalogue.md`. |
 | `app/api/sync/referrals` | Push endpoint for referral events and orders. Service-role, shared-secret. |
@@ -82,7 +83,7 @@ one address for you.
 | `supabase/migrations/**` | The schema and the RLS policies. Pasted by hand. |
 | `supabase/seed/001_demo.sql` | A whole demo firm — 5 projects, boards, quotes, procurement, ledger, referrals, rewards. Idempotent. |
 | `supabase/seed/002_console.sql` | The demo B2B team, two more firms, prospects, onboarding forms, portfolios, activity. |
-| `supabase/test/**` | Migrations + seeds + 108 RLS assertions against a throwaway Postgres. Its deps are deliberately outside the app's `package.json`. |
+| `supabase/test/**` | Migrations + seeds + 132 RLS assertions against a throwaway Postgres. Its deps are deliberately outside the app's `package.json`. |
 
 ## House rules
 
@@ -173,7 +174,7 @@ Module detail lives in `docs/`, read on demand:
 | `docs/rewards.md` | The six tiers, cumulative unlocking, handover |
 | `docs/open-questions.md` | What is decided by default and needs a human to confirm |
 | `docs/landmines.md` | **Six bugs already shipped here**, kept because the shape of each recurs. Read before trusting a passing build. |
-| `supabase/test/README.md` | What the 51 assertions cover, and the two shim details that are load-bearing |
+| `supabase/test/README.md` | What the 132 assertions cover, and the two shim details that are load-bearing |
 
 **When you change behaviour a doc describes, update that doc in the same
 commit.** A doc describing last month's behaviour is worse than no doc, because

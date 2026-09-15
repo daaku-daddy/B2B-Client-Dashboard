@@ -1,15 +1,15 @@
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { Eye } from 'lucide-react'
 import { requireStaff } from '@/lib/data/session'
 import {
-  getPartner, listActivityFor, listClaimsFor, listOrdersFor, listReferralsFor, listStaff,
+  getPartner, listActivityFor, listClaimsFor, listOrdersFor, listPortfolioFor, listReferralsFor, listStaff,
 } from '@/lib/data/console-queries'
 import { listRewardTiers } from '@/lib/data/queries'
-import { supabaseServer } from '@/lib/supabase/server'
 import { PartnerDetail } from '@/components/console/PartnerDetail'
 import { partnerStanding } from '@/lib/domain/tiering'
 import { PageHead } from '@/components/shell/PageHead'
-import { Problem } from '@/components/ui'
-import type { PortfolioItem } from '@/lib/domain/types'
+import { Button, Problem } from '@/components/ui'
 
 export default async function ConsolePartnerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -35,15 +35,12 @@ export default async function ConsolePartnerPage({ params }: { params: Promise<{
   // staff member out of market is the same answer as "does not exist".
   if (!partner.data) notFound()
 
-  const [referrals, claims, tiers, activity, team] = await Promise.all([
+  const [referrals, claims, tiers, activity, team, portfolio] = await Promise.all([
     listReferralsFor(id), listClaimsFor(id), listRewardTiers(), listActivityFor(id), listStaff(),
+    listPortfolioFor(id),
   ])
 
   const orders = await listOrdersFor(referrals.ok ? referrals.data.map((r) => r.id) : [])
-
-  const sb = await supabaseServer()
-  const portfolio = await sb
-    .from('portfolio_item').select('*').eq('partner_id', id).order('sort_order')
 
   const problems = [
     !referrals.ok ? referrals.error : null,
@@ -51,7 +48,7 @@ export default async function ConsolePartnerPage({ params }: { params: Promise<{
     !claims.ok ? claims.error : null,
     !tiers.ok ? tiers.error : null,
     !activity.ok ? activity.error : null,
-    portfolio.error ? `Could not load their portfolio: ${portfolio.error.message}` : null,
+    !portfolio.ok ? portfolio.error : null,
   ].filter((v): v is string => Boolean(v))
 
   return (
@@ -59,6 +56,11 @@ export default async function ConsolePartnerPage({ params }: { params: Promise<{
       <PageHead
         title={partner.data.firm_name}
         crumbs={[{ href: '/console/partners', label: 'Firms' }, { label: partner.data.firm_name }]}
+        action={
+          <Link href={`/console/partners/${partner.data.id}/dashboard`}>
+            <Button><Eye size={14} /> Open their dashboard</Button>
+          </Link>
+        }
       />
       <div className="px-4 py-5 md:px-6">
         <PartnerDetail
@@ -69,7 +71,7 @@ export default async function ConsolePartnerPage({ params }: { params: Promise<{
           claims={claims.ok ? claims.data : []}
           tiers={tiers.ok ? tiers.data : []}
           activity={activity.ok ? activity.data : []}
-          portfolio={(portfolio.data ?? []) as PortfolioItem[]}
+          portfolio={portfolio.ok ? portfolio.data : []}
           team={team.ok ? team.data : []}
           isAdmin={staff.data.role === 'admin'}
           problems={problems}

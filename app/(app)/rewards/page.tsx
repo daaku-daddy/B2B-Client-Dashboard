@@ -47,7 +47,13 @@ export default async function RewardsPage() {
         <Stat
           label="Next milestone needs"
           value={status.next ? inr(status.next.remaining) : '—'}
-          hint={status.next ? status.next.tier.label : 'Nothing left to unlock'}
+          hint={
+            status.next
+              ? status.next.tier.label
+              : status.complete
+                ? 'Nothing left to unlock'
+                : 'The ladder is not set up yet'
+          }
         />
       </div>
 
