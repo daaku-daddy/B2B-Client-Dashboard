@@ -3,6 +3,7 @@ import { fail, ok, type Result } from './result'
 import type {
   Board, BoardItem, Client, FinanceEntry, ProcurementItem, Project, ProjectArea,
   Quote, QuoteLine, Referral, ReferralEvent, ReferralOrder, RewardClaim, RewardTier,
+  PortfolioItem, PartnerActivity,
 } from '@/lib/domain/types'
 
 /**
@@ -135,3 +136,28 @@ export const listRewardTiers = () =>
 
 export const listRewardClaims = () =>
   many<RewardClaim>((sb) => sb.from('reward_claim').select('*').order('tier_id'), 'your rewards')
+
+// --------------------------------------------------------------- portfolio
+
+export const listPortfolio = () =>
+  many<PortfolioItem>(
+    (sb) => sb.from('portfolio_item').select('*').order('sort_order').order('created_at'),
+    'your portfolio',
+  )
+
+export const getPortfolioItem = (id: string) =>
+  one<PortfolioItem>((sb) => sb.from('portfolio_item').select('*').eq('id', id).maybeSingle(), 'this portfolio piece')
+
+// ---------------------------------------------------------------- activity
+
+/**
+ * What Material Depot has done with this firm. RLS hides the rows staff marked
+ * internal, so this returns the partner-visible history and nothing else — there
+ * is no `visible_to_partner` filter here on purpose, because adding one would
+ * hide a policy bug rather than surface it.
+ */
+export const listActivity = (limit = 50) =>
+  many<PartnerActivity>(
+    (sb) => sb.from('partner_activity').select('*').order('occurred_at', { ascending: false }).limit(limit),
+    'your account history',
+  )

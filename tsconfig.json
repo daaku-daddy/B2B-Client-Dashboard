@@ -15,6 +15,12 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    // test/domain.test.ts is run by `node --experimental-strip-types`, which
+    // resolves the real file and therefore needs the `.ts` on its imports.
+    // Enabling this keeps that file inside `tsc --noEmit` rather than excluding
+    // it — an untypechecked test is how a test rots without anybody noticing.
+    // Safe with noEmit: it permits the syntax, it does not change any output.
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "incremental": true,
     "plugins": [

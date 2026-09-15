@@ -1,3 +1,5 @@
+import { currentSession } from '@/lib/data/session'
+import { WorkspaceOff } from '@/components/shell/WorkspaceOff'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowRight, Mail, MapPin, Phone } from 'lucide-react'
@@ -9,6 +11,11 @@ import { STAGES } from '@/lib/domain/project'
 import { date, inr, inrShort } from '@/lib/format'
 
 export default async function ClientPage({ params }: { params: Promise<{ id: string }> }) {
+  // The project workspace is opt-in per firm. Checked here as well as in
+  // the nav: a nav item that is merely hidden is still a URL anyone can type.
+  const gate = await currentSession()
+  if (gate.ok && gate.data && !gate.data.partner.workspace_enabled) return <WorkspaceOff what="Clients" />
+
   const { id } = await params
   const [client, projects, referrals] = await Promise.all([getClient(id), listProjects(), listReferrals()])
 

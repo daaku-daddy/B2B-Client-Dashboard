@@ -3,6 +3,7 @@
 
 export type FirmType = 'architect' | 'interior_designer' | 'design_build' | 'contractor' | 'other'
 export type PartnerRole = 'principal' | 'associate' | 'viewer'
+export type OnboardingSource = 'self_signup' | 'outreach' | 'inbound' | 'existing_client'
 
 export type Partner = {
   id: string
@@ -15,6 +16,26 @@ export type Partner = {
   firm_type: FirmType
   onboarded_on: string
   created_at: string
+  // 003_roles.sql. Every field below is set by Material Depot, not by the firm —
+  // a trigger in 004_roles_rls.sql refuses a firm's own update to any of them.
+  market: string | null
+  kam_user_id: string | null
+  onboarding_source: OnboardingSource
+  onboarded_by: string | null
+  md_client_id: string | null
+  /**
+   * The full project workspace — rooms, boards, quotes, procurement, P&L.
+   * OFF by default and turned on per firm by Material Depot. A designer will
+   * not move their pricing into a supplier's portal on day one, and a nav full
+   * of modules they never asked for is what makes them close the tab.
+   */
+  workspace_enabled: boolean
+  internal_note: string | null
+  // Public studio profile, for materialdepot.com. The firm owns these.
+  bio: string | null
+  website: string | null
+  instagram: string | null
+  logo_url: string | null
 }
 
 export type Client = {
@@ -219,6 +240,8 @@ export type ReferralEvent = {
   synced_at: string
 }
 
+export type OrderApproval = 'pending' | 'approved' | 'rejected'
+
 export type ReferralOrder = {
   id: string
   referral_id: string
@@ -226,7 +249,18 @@ export type ReferralOrder = {
   order_value: number
   ordered_on: string | null
   store: string | null
+  /** Material Depot's own order status — "Delivered", "Partially delivered". */
   status: string | null
+  /**
+   * Whether a Material Depot admin has verified this order. ONLY `approved`
+   * counts towards the reward ladder. Money is handed over on the strength of
+   * this number, so it gets a human — `review_referral_order()` in
+   * 004_roles_rls.sql is the only thing that can change it.
+   */
+  approval_status: OrderApproval
+  approved_by: string | null
+  approved_at: string | null
+  review_note: string | null
   synced_at: string
 }
 
@@ -247,4 +281,129 @@ export type RewardClaim = {
   unlocked_at: string
   fulfilled_on: string | null
   notes: string | null
+}
+
+// ------------------------------------------------- Material Depot's own people
+
+export type StaffRole = 'admin' | 'kam' | 'outreach' | 'inbound'
+
+export type StaffUser = {
+  user_id: string
+  name: string
+  email: string | null
+  phone: string | null
+  role: StaffRole
+  /** null = every market. That is the admin and the central team. */
+  market: string | null
+  active: boolean
+  created_at: string
+}
+
+/** What `my_kam()` returns to a partner. Their KAM, never anyone else's. */
+export type MyKam = {
+  name: string
+  phone: string | null
+  email: string | null
+  market: string | null
+}
+
+export type ApplicationStatus = 'submitted' | 'approved' | 'rejected' | 'provisioned'
+
+export type PartnerApplication = {
+  id: string
+  firm_name: string
+  contact_name: string
+  phone: string
+  email: string
+  city: string | null
+  market: string | null
+  firm_type: FirmType
+  gst: string | null
+  team_size: string | null
+  typical_projects: string | null
+  met_on: string | null
+  meeting_notes: string | null
+  source: 'outreach' | 'inbound' | 'walk_in' | 'partner_referral' | 'existing_client' | 'other'
+  proposed_kam: string | null
+  status: ApplicationStatus
+  reviewed_by: string | null
+  reviewed_at: string | null
+  review_note: string | null
+  partner_id: string | null
+  credentials_issued_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ProspectStage =
+  | 'to_contact' | 'contacted' | 'meeting_set' | 'met' | 'onboarding' | 'onboarded' | 'not_interested'
+
+export type OutreachProspect = {
+  id: string
+  firm_name: string
+  contact_name: string | null
+  phone: string | null
+  email: string | null
+  city: string | null
+  market: string
+  firm_type: string | null
+  source: string | null
+  stage: ProspectStage
+  owner_id: string | null
+  next_action_on: string | null
+  notes: string | null
+  application_id: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type TouchKind = 'call' | 'whatsapp' | 'email' | 'meeting' | 'visit' | 'note'
+
+export type OutreachTouch = {
+  id: string
+  prospect_id: string
+  kind: TouchKind
+  occurred_at: string
+  outcome: string | null
+  note: string | null
+  by_user: string | null
+  created_at: string
+}
+
+export type PortfolioStatus = 'draft' | 'submitted' | 'published' | 'rejected'
+
+export type PortfolioItem = {
+  id: string
+  partner_id: string
+  title: string
+  summary: string | null
+  project_type: string | null
+  city: string | null
+  completed_on: string | null
+  area_sqft: number | null
+  cover_url: string | null
+  image_urls: string[]
+  credits: string | null
+  status: PortfolioStatus
+  submitted_at: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  review_note: string | null
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export type PartnerActivity = {
+  id: string
+  partner_id: string
+  kind: string
+  title: string
+  detail: string | null
+  occurred_at: string
+  visible_to_partner: boolean
+  by_user: string | null
+  created_at: string
 }

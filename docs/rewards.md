@@ -23,7 +23,10 @@ Tiers are **cumulative**: crossing ₹5 L means tiers 1, 2 and 3 are all earned.
 The brief lists them as milestones on one ladder, not as an either/or.
 
 Attributed sale is `SUM(referral_order.order_value)` across the partner's
-referrals, computed at read time. Nothing stores a running total, because a
+referrals **where `approval_status = 'approved'`**, computed at read time.
+`attributedSale()` in `lib/domain/rewards.ts` is the only function allowed to
+total it, and `pendingSale()` reports what is waiting on an admin so the two are
+never added together by accident. `docs/referrals.md` has why the gate exists. Nothing stores a running total, because a
 stored total has two independent ways to go stale — a new order, and a corrected
 order value — and an architect who sees two different figures for their own
 progress stops trusting the whole dashboard.

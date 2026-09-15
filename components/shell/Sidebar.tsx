@@ -1,15 +1,31 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { LogOut } from 'lucide-react'
-import { NAV } from './nav'
+import type { NavItem } from './nav'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { cn } from '@/lib/cn'
-import type { Partner } from '@/lib/domain/types'
 
-export function Sidebar({ partner, email }: { partner: Partner; email: string | null }) {
+/**
+ * One sidebar, two apps. The partner app and the Material Depot console are
+ * deliberately not styled differently for its own sake — but the eyebrow says
+ * which one you are in, because a KAM and a partner can be signed in on the same
+ * laptop and "whose screen am I looking at" has to be answerable at a glance.
+ */
+export function Sidebar({
+  items,
+  eyebrow,
+  footerTitle,
+  footerSub,
+  tone = 'brand',
+}: {
+  items: NavItem[]
+  eyebrow: string
+  footerTitle: string
+  footerSub: string | null
+  tone?: 'brand' | 'ink'
+}) {
   const path = usePathname()
   const router = useRouter()
 
@@ -25,12 +41,24 @@ export function Sidebar({ partner, email }: { partner: Partner; email: string | 
         <p className="font-display text-[15px] leading-tight font-semibold tracking-tight text-ink">
           Material Depot
         </p>
-        <p className="text-[11px] font-medium tracking-wide text-brand uppercase">for Partners</p>
+        <p
+          className={cn(
+            'text-[11px] font-medium tracking-wide uppercase',
+            tone === 'ink' ? 'text-ink-soft' : 'text-brand',
+          )}
+        >
+          {eyebrow}
+        </p>
       </div>
 
       <nav className="flex gap-1 overflow-x-auto p-2 md:flex-1 md:flex-col md:overflow-visible">
-        {NAV.map((item) => {
-          const active = path === item.href || path.startsWith(`${item.href}/`)
+        {items.map((item) => {
+          // `/console` would light up on every console page without the exact
+          // check, so the root of each app is matched exactly and everything
+          // else by prefix.
+          const active =
+            path === item.href ||
+            (item.href !== '/console' && item.href !== '/dashboard' && path.startsWith(`${item.href}/`))
           return (
             <Link
               key={item.href}
@@ -48,8 +76,8 @@ export function Sidebar({ partner, email }: { partner: Partner; email: string | 
       </nav>
 
       <div className="hidden border-t border-line p-3 md:block">
-        <p className="truncate text-xs font-semibold text-ink">{partner.firm_name}</p>
-        <p className="truncate text-[11px] text-ink-faint">{email ?? partner.phone}</p>
+        <p className="truncate text-xs font-semibold text-ink">{footerTitle}</p>
+        <p className="truncate text-[11px] text-ink-faint">{footerSub ?? ''}</p>
         <button
           onClick={signOut}
           className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-ink-faint transition hover:text-bad"

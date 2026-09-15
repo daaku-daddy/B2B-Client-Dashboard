@@ -641,32 +641,46 @@ on conflict (id) do update set
 
 -- The orders. `md_enq_id` is unique, which is what makes the reward total
 -- idempotent — re-running this file cannot inflate it.
-insert into referral_order (id, referral_id, md_enq_id, order_value, ordered_on, store, status) values
+--
+-- `approval_status` is the gate a Material Depot admin holds: only an APPROVED
+-- order counts towards the reward ladder. One of these is deliberately left
+-- `pending` so the admin console has something real in its queue and the demo
+-- firm can see what "being verified" looks like from their side.
+insert into referral_order (id, referral_id, md_enq_id, order_value, ordered_on, store, status, approval_status, approved_at) values
   ('cccccccc-cccc-4ccc-8ccc-cccccccccc01', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01', 'ENQ2026072884321',
-   384500, current_date - 30, 'Whitefield', 'Delivered'),
+   384500, current_date - 30, 'Whitefield', 'Delivered', 'approved', now() - interval '28 days'),
   ('cccccccc-cccc-4ccc-8ccc-cccccccccc02', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01', 'ENQ2026080691204',
-   142000, current_date - 9, 'Whitefield', 'Partially delivered'),
+   142000, current_date - 9, 'Whitefield', 'Partially delivered', 'pending', null),
   ('cccccccc-cccc-4ccc-8ccc-cccccccccc03', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa03', 'ENQ2026060471183',
-   96000, current_date - 97, 'Sarjapur', 'Delivered')
+   96000, current_date - 97, 'Sarjapur', 'Delivered', 'approved', now() - interval '95 days')
 on conflict (id) do update set
   md_enq_id = excluded.md_enq_id, order_value = excluded.order_value,
-  ordered_on = excluded.ordered_on, store = excluded.store, status = excluded.status;
+  ordered_on = excluded.ordered_on, store = excluded.store, status = excluded.status,
+  approval_status = excluded.approval_status, approved_at = excluded.approved_at;
 
 -- ----------------------------------------------------------- 11. rewards
--- ₹6,22,500 attributed, so tiers 1, 2 and 3 are earned and the next one is the
--- 3 GM gold coin at ₹10 L — ₹3,77,500 away. These rows record only that the
--- tiers were REACHED and where the handover got to; whether a tier is unlocked
--- is derived from referral_order every time it is displayed.
+-- ₹4,80,500 APPROVED (₹3,84,500 + ₹96,000), so tiers 1 and 2 are earned and the
+-- 1 GM gold coin at ₹5 L is ₹19,500 away. The ₹1,42,000 order still waiting on
+-- an admin does not count yet — which is the whole point of the gate, and makes
+-- the demo show a partner who is one verification from the next milestone.
+--
+-- These rows record only that the tiers were REACHED and where the handover got
+-- to; whether a tier is unlocked is derived from the approved orders every time
+-- it is displayed.
 insert into reward_claim (id, partner_id, tier_id, status, unlocked_at, fulfilled_on, notes) values
   ('dddddddd-dddd-4ddd-8ddd-dddddddddd01', '0d0d0d0d-0000-4000-8000-000000000001', 1, 'fulfilled',
    now() - interval '30 days', current_date - 21, 'Handed over at the Whitefield store.'),
   ('dddddddd-dddd-4ddd-8ddd-dddddddddd02', '0d0d0d0d-0000-4000-8000-000000000001', 2, 'claimed',
-   now() - interval '30 days', null, 'Claimed — courier arranged.'),
-  ('dddddddd-dddd-4ddd-8ddd-dddddddddd03', '0d0d0d0d-0000-4000-8000-000000000001', 3, 'unlocked',
-   now() - interval '9 days', null, null)
+   now() - interval '30 days', null, 'Claimed — courier arranged.')
 on conflict (partner_id, tier_id) do update set
   status = excluded.status, unlocked_at = excluded.unlocked_at,
   fulfilled_on = excluded.fulfilled_on, notes = excluded.notes;
+
+-- A tier 3 claim written by an earlier version of this seed would now sit above
+-- an attributed total that no longer reaches it. Remove it rather than leave the
+-- demo showing a coin it has not earned.
+delete from reward_claim
+ where partner_id = '0d0d0d0d-0000-4000-8000-000000000001' and tier_id = 3;
 
 -- ============================================================================
 -- Sanity check — run this after, it should print the figures the app shows.
@@ -682,9 +696,12 @@ select
   (select count(*) from finance_entry)                                 as ledger_entries,
   (select count(*) from referral)                                      as referrals,
   (select count(*) from referral_event)                                as referral_events,
-  (select coalesce(sum(order_value), 0) from referral_order)           as attributed_sale,
+  (select coalesce(sum(order_value), 0) from referral_order
+     where approval_status = 'approved')                               as attributed_sale,
+  (select count(*) from referral_order where approval_status = 'pending') as orders_awaiting_admin,
   (select count(*) from reward_tier
-     where threshold <= (select coalesce(sum(order_value), 0) from referral_order)) as tiers_earned;
+     where threshold <= (select coalesce(sum(order_value), 0) from referral_order
+                          where approval_status = 'approved'))         as tiers_earned;
 
 -- ============================================================================
 -- TEARDOWN, when you want the real data in instead. Deletes cascade from

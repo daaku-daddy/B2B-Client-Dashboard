@@ -548,3 +548,121 @@ export async function createReferral(input: {
 export async function deleteReferral(id: string) {
   return remove('referral', id, 'this referral', '/referrals')
 }
+
+// --------------------------------------------------------------- portfolio
+
+/**
+ * The work a partner wants on materialdepot.com.
+ *
+ * A firm owns its own portfolio right up to the point it asks to be published,
+ * and not past it: the RLS policies in `004_roles_rls.sql` let a firm move an
+ * item draft → submitted and rework a rejected one, and refuse a firm the
+ * `published` status entirely. Nothing here re-checks that — if a write of the
+ * wrong status succeeds, the policy is wrong and gets fixed there.
+ */
+export async function createPortfolioItem(input: {
+  title: string
+  summary?: string | null
+  project_type?: string | null
+  city?: string | null
+  completed_on?: string | null
+  area_sqft?: number | null
+  cover_url?: string | null
+  credits?: string | null
+}) {
+  if (!input.title?.trim()) return fail('Give the project a name — that is what appears on the site.')
+  const pid = await partnerId()
+  if (!pid.ok) return pid
+
+  return insert(
+    'portfolio_item',
+    {
+      partner_id: pid.data,
+      title: input.title.trim(),
+      summary: input.summary?.trim() || null,
+      project_type: input.project_type?.trim() || null,
+      city: input.city?.trim() || null,
+      completed_on: input.completed_on || null,
+      area_sqft: input.area_sqft ?? null,
+      cover_url: input.cover_url?.trim() || null,
+      credits: input.credits?.trim() || null,
+      status: 'draft',
+    },
+    'this portfolio piece',
+    '/portfolio',
+  )
+}
+
+export async function updatePortfolioItem(id: string, values: Row) {
+  return update('portfolio_item', id, values, 'this portfolio piece', '/portfolio')
+}
+
+/**
+ * Hand a piece to Material Depot to look at.
+ *
+ * Reports the row-level-security refusal rather than swallowing it: a partner
+ * who clicks Submit on a published piece needs to be told it is already live,
+ * not left looking at a button that does nothing.
+ */
+export async function submitPortfolioItem(id: string) {
+  const sb = await supabaseServer()
+  const { data, error } = await sb
+    .from('portfolio_item')
+    .update({ status: 'submitted', submitted_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+  if (error) return fail(`Could not send this for review: ${error.message}`)
+  if (!data?.length) {
+    return fail(
+      'This piece cannot be sent for review — a published piece is locked, and a piece already waiting on us cannot be sent twice.',
+    )
+  }
+  revalidatePath('/portfolio')
+  return ok(data[0])
+}
+
+export async function deletePortfolioItem(id: string) {
+  return remove('portfolio_item', id, 'this portfolio piece', '/portfolio')
+}
+
+/**
+ * The firm's own studio profile — the part of `partner` a firm is allowed to
+ * write. Every other column on that table is frozen by the trigger in
+ * `004_roles_rls.sql`, so this deliberately names the writable fields one by one
+ * rather than spreading a payload: a stray key would come back as a permission
+ * error the user cannot act on.
+ */
+export async function updateStudioProfile(input: {
+  firm_name?: string
+  contact_name?: string
+  email?: string | null
+  city?: string | null
+  gst?: string | null
+  bio?: string | null
+  website?: string | null
+  instagram?: string | null
+  logo_url?: string | null
+}) {
+  const pid = await partnerId()
+  if (!pid.ok) return pid
+
+  const values: Row = {}
+  const text = (v: string | null | undefined) => (v === undefined ? undefined : v?.trim() || null)
+  if (input.firm_name !== undefined) {
+    if (!input.firm_name.trim()) return fail('A studio needs a name.')
+    values.firm_name = input.firm_name.trim()
+  }
+  if (input.contact_name !== undefined) {
+    if (!input.contact_name.trim()) return fail('Your own name cannot be blank.')
+    values.contact_name = input.contact_name.trim()
+  }
+  for (const k of ['email', 'city', 'gst', 'bio', 'website', 'instagram', 'logo_url'] as const) {
+    const v = text(input[k])
+    if (v !== undefined) values[k] = v
+  }
+  if (!Object.keys(values).length) return fail('Nothing to save.')
+
+  const r = await update<unknown>('partner', pid.data, values, 'your studio profile', '/portfolio')
+  if (r.ok) revalidatePath('/dashboard')
+  return r
+}

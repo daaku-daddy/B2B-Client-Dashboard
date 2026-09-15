@@ -1,0 +1,106 @@
+# Who uses this, and what each of them can see
+
+**Covers:** `app/(console)/** · components/console/** · lib/data/session.ts · lib/data/console-*.ts · staff_user · 003_roles.sql · 004_roles_rls.sql`
+
+Three kinds of people sign in here, and they get different apps.
+
+| Kind | What they are | Where they land |
+|---|---|---|
+| **Partner** | An architect or interior designer | `app/(app)/**` |
+| **Staff** | Material Depot: admin, KAM, outreach, inbound | `app/(console)/**` |
+| Neither | Signed in, attached to nothing | The onboarding form, or a note saying an admin has to link them |
+
+`currentActor()` in `lib/data/session.ts` decides which, in one query pair, and
+each layout redirects the other kind away. A staff member who lands on
+`/dashboard` gets bounced to `/console` rather than shown an empty partner
+workspace they would read as a broken app.
+
+## The trust boundary
+
+**Material Depot staff see the relationship. They never see the work.**
+
+A KAM, an outreach manager and an admin can read a firm's profile, the clients
+that firm referred to us, those clients' orders, the firm's rewards, its
+portfolio and its history with us. They **cannot** read `client`, `project`,
+`project_area`, `board`, `board_item`, `quote`, `quote_line`,
+`procurement_item` or `finance_entry` — the architect's own clients, their
+prices and their margins.
+
+There is no policy on those tables for staff and there must never be one. A
+"just for support" read would throw away the only reason a designer would put
+their pricing in a supplier's portal at all. `supabase/test/rlstest.js` group 8
+checks each of the nine tables by name, as an admin and as a KAM.
+
+The same rule going the other way: a partner cannot read `staff_user`,
+`partner_application`, `outreach_prospect` or `outreach_touch` (group 9). Their
+KAM's name and number reach them through `my_kam()`, a SECURITY DEFINER function
+that returns exactly one row — theirs.
+
+## The four staff roles
+
+| Role | Market | Does |
+|---|---|---|
+| `admin` | every market | Verifies orders and onboarding forms, issues logins, publishes portfolios, manages the team |
+| `kam` | one market | Looks after firms once they are on the platform; works the reactivation list |
+| `outreach` | one market | Works the list of firms who are not with us yet, and files the onboarding form |
+| `inbound` | every market | Firms that came to us. Same pipeline as outreach today — see the open question below |
+
+## Market segregation
+
+`staff_user.market`, `partner.market`, `outreach_prospect.market` and
+`partner_application.market` are free text validated against
+`lib/domain/markets.ts` — Bangalore and Hyderabad today. **No CHECK constraint**,
+deliberately, same as `project_area.area_type`: opening Chennai is a line in
+that file and a deploy, not a migration somebody has to remember to paste.
+
+Two rules, both in `app_covers_market()`:
+
+- A staff member with **`market = null` covers every market.** That is the admin
+  and the central team.
+- A row with **`market = null` is visible to everyone on the team**, not to
+  nobody. An unassigned firm that nobody can see is a firm nobody follows up.
+
+A KAM additionally sees any firm they are personally the KAM for, whatever its
+market — a reassignment across cities should not lose them the account.
+
+## What a firm is not allowed to change about itself
+
+`partner` has an UPDATE policy for the firm (so it can edit its own name and
+studio profile) and one for admins. RLS cannot restrict an update to some
+columns, so a `BEFORE UPDATE` trigger — `partner_guard_md_fields()` — refuses a
+non-admin's change to `phone`, `market`, `kam_user_id`, `workspace_enabled`,
+`md_client_id`, `onboarding_source`, `onboarded_by` and `internal_note`.
+
+Without it, the policy a firm needs in order to rename itself would also let it
+reassign its own KAM and switch its own modules on. Checked in group 12.
+
+The trigger lets anything through when `auth.uid()` is null — the service role
+and the SQL Editor. Every signed-in route into the table is a policy that is
+`to authenticated` and needs a uid, so null there cannot be a partner.
+
+## The project workspace is opt-in
+
+`partner.workspace_enabled` defaults to **false**. Design boards, client quotes,
+procurement and the project ledger are all built, and hidden until a firm asks
+for them.
+
+An architect who has just been handed a login by a supplier is not going to move
+their client pricing into it on day one, and a sidebar full of modules they have
+not asked for is what makes the whole thing look like a system to be managed.
+`partnerNav()` drops those items, and `app/(app)/projects/**` and
+`app/(app)/clients/**` each check the flag as well — a hidden nav item is still
+a URL anyone can type.
+
+An admin turns it on from the firm's page in the console.
+
+## Bootstrapping the first admin
+
+An auth user is made by GoTrue, not by an `INSERT`, so there is no way for SQL
+alone to create the first staff login. The snippet is in
+`supabase/migrations/README.md`: sign up through `/login` with a Material Depot
+address, **do not fill in the firm form**, then link the row by hand. After that,
+every other staff member is added from `/console/staff`.
+
+`onboard_partner()` refuses to create a firm for a login that already has a
+`staff_user` row, so a staff member who walks through the sign-up form by
+accident gets told what they are rather than ending up as a one-person studio.

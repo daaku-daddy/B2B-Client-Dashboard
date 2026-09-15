@@ -11,7 +11,15 @@ apply a change to it.
 |---|---|---|
 | `001_init.sql` | Tables, indexes, the six reward tiers, `updated_at` triggers | ☑ 2026-09-11 |
 | `002_rls.sql` | RLS on every table, ownership helper functions, `onboard_partner()` | ☑ 2026-09-11 |
+| `003_roles.sql` | `staff_user`, partner lifecycle columns, the order approval gate, onboarding forms, the outreach pipeline, portfolios, partner activity | ☐ |
+| `004_roles_rls.sql` | Policies for all of the above, the partner field guard, `review_referral_order()`, `review_portfolio_item()`, `my_kam()` | ☐ |
 | `../seed/001_demo.sql` | Demo data — a firm, 4 clients, 5 projects, boards, quotes, procurement, ledger, referrals, rewards | ☐ |
+| `../seed/002_console.sql` | Demo console data — the team, two more firms, prospects, onboarding forms, portfolios, activity | ☐ |
+
+**003 and 004 must be run BEFORE the app that needs them is deployed.** Every
+page reads `staff_user` through `currentActor()`, so a deployment that lands
+first shows every partner "We could not load your workspace" until the paste
+happens. Run the SQL, then deploy.
 
 Both migrations, and the seed, are tested against a real Postgres by
 `supabase/test` — `cd supabase/test && npm install && npm run all`. That suite

@@ -9,6 +9,7 @@ import {
 } from '@/components/ui'
 import { Modal } from '@/components/ui/Modal'
 import { ReferralFeed } from './ReferralFeed'
+import { OrderApprovalBadge } from './OrderApproval'
 import { createReferral, deleteReferral } from '@/lib/data/actions'
 import { date, inr, inrShort, relative } from '@/lib/format'
 
@@ -40,13 +41,21 @@ export function ReferralsView({
   const names = useMemo(() => new Map(referrals.map((r) => [r.id, r.client_name])), [referrals])
 
   const stats = useMemo(() => {
-    const byRef = new Map<string, { orders: number; value: number; events: number; last: string | null }>()
-    for (const r of referrals) byRef.set(r.id, { orders: 0, value: 0, events: 0, last: null })
+    // `value` is APPROVED money only — it is what the rewards ladder is computed
+    // from, so a total here that included an unverified order would disagree with
+    // the Rewards page by exactly that order. `pending` is carried separately and
+    // shown as its own thing.
+    const byRef = new Map<string, { orders: number; value: number; pending: number; pendingCount: number; events: number; last: string | null }>()
+    for (const r of referrals) byRef.set(r.id, { orders: 0, value: 0, pending: 0, pendingCount: 0, events: 0, last: null })
     for (const o of orders) {
       const row = byRef.get(o.referral_id)
       if (!row) continue
       row.orders += 1
-      row.value += Number(o.order_value || 0)
+      if (o.approval_status === 'approved') row.value += Number(o.order_value || 0)
+      else if (o.approval_status === 'pending') {
+        row.pending += Number(o.order_value || 0)
+        row.pendingCount += 1
+      }
     }
     for (const e of events) {
       const row = byRef.get(e.referral_id)
@@ -131,13 +140,17 @@ export function ReferralsView({
               ) : (
                 <Table className="min-w-0">
                   <thead>
-                    <tr><Th>Order</Th><Th>Placed</Th><Th className="text-right">Value</Th></tr>
+                    <tr><Th>Order</Th><Th>Placed</Th><Th /><Th className="text-right">Value</Th></tr>
                   </thead>
                   <tbody>
                     {myOrders.map((o) => (
                       <tr key={o.id}>
-                        <Td className="font-mono text-[11px]">{o.md_enq_id}</Td>
+                        {/* The enquiry id gets the room its real length needs. A
+                            truncated ENQ… is not a shortened number, it is a
+                            different one to anyone reading it off the screen. */}
+                        <Td className="font-mono text-[11px]" title={o.md_enq_id}>{o.md_enq_id}</Td>
                         <Td className="text-xs text-ink-soft">{date(o.ordered_on)}</Td>
+                        <Td><OrderApprovalBadge status={o.approval_status} /></Td>
                         <Td className="tnum text-right text-xs font-medium">{inr(o.order_value)}</Td>
                       </tr>
                     ))}
@@ -145,9 +158,15 @@ export function ReferralsView({
                 </Table>
               )}
               <div className="flex items-center justify-between border-t border-line px-4 py-2.5">
-                <span className="text-xs font-medium text-ink-soft">Total</span>
+                <span className="text-xs font-medium text-ink-soft">Counting towards your rewards</span>
                 <span className="tnum text-sm font-semibold text-good">{inr(s?.value ?? 0)}</span>
               </div>
+              {s?.pendingCount ? (
+                <p className="border-t border-line px-4 py-2 text-[11px] text-ink-faint">
+                  {inr(s.pending)} across {s.pendingCount} order{s.pendingCount === 1 ? '' : 's'} is still
+                  being checked by us, and is not in that figure yet.
+                </p>
+              ) : null}
             </Card>
 
             {open.notes ? (
