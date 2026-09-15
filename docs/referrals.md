@@ -2,6 +2,70 @@
 
 **Covers:** `components/referrals/** · app/api/sync/referrals/route.ts · referral · referral_event · referral_order`
 
+## The screen: one row per client, the log behind the name
+
+The partner's home page opens with the **list of clients they referred** — not a
+merged stream of every event from all of them. The stream was the first cut and
+it was the wrong unit. Four clients' visits, views and orders interleaved
+newest-first is the shape a log file has; the question an architect actually has
+is per person, and the answer to "how is the Rao job going" was scattered down
+six rows of somebody else's activity.
+
+So: `ClientActivity` renders the list (name, where and when they were last seen,
+what is in their cart, what has counted) and swaps to that one client's timeline
+when a name is tapped. `/referrals?client=<referral id>` opens the same client on
+the full record page, which is what the list links to.
+
+Inside, each event is **a chip and a value**, not a sentence: the store for a
+visit, the product for a view, the size and value of a cart, the enquiry id for
+an order. The prose — `title`, `detail`, the whole free-form `payload` — is one
+tap away on the row somebody cares about. That is `ReferralFeed`, and it is the
+same component on the client page and in the console mirror.
+
+### The cart is the point of the screen
+
+A referred client with things in a cart and no order is the one row worth acting
+on today, so it is a chip on the list and the first panel inside — item count,
+what is in it, and what it is worth.
+
+`referral_event` has no cart state. It is an append-only log, so "is this cart
+still open" is **derived**, in `cartState()` (`lib/domain/referrals.ts`):
+
+- The newest `cart_add` is the cart. Older ones are history.
+- It is closed by an `order_placed` **event** at or after it (compared as
+  instants — `+05:30` and `+00:00` both arrive, and string ordering would put a
+  cart after the order that closed it), or by a `referral_order` **row** whose
+  `ordered_on` falls on the cart's day or later. Both signals are read because
+  the sync takes `events` and `orders` as independent arrays: a producer that
+  pushes only the order row would otherwise leave a bought-out cart looking open
+  for ever, and the architect would ring a client who had already bought.
+  `ordered_on` is a date, so that half of the rule is day-granular, and it counts
+  a `pending` order — approval decides who gets paid, not whether the client
+  bought.
+- A producer that knows better can say so: `payload.cart_status` of `open` or
+  `ordered` wins outright.
+
+Open, ordered and *never had a cart* are three states, not two. The UI says which
+one it is looking at ("Still open", "Ordered", "Nothing in a cart") rather than
+asserting "active cart" as something Material Depot told us.
+
+### The cart payload, for whoever builds the producer
+
+`payload` on a `cart_add` is free-form and two shapes are read:
+
+```jsonc
+"payload": { "items": 3 }                        // just a count
+"payload": { "items": [                          // itemised — prefer this
+  { "name": "Engineered Oak Plank 14mm", "sku": "WF 4402",
+    "qty": 420, "unit": "sqft", "rate": 142 }
+], "cart_status": "open" }
+```
+
+`event.amount` is the cart's value. With an itemised list the panel shows the
+lines; with a count it falls back to `detail` as prose. An item the payload does
+not name is still counted — dropping it would understate a cart the architect is
+about to ring their client about.
+
 ## What this promises the architect
 
 > Client X visited the Whitefield store on 9 September at 1pm. Here is what they

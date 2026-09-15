@@ -4,8 +4,12 @@
 
 `app/(app)/**` is what an architect or interior designer sees: the clients they
 referred to us and what those clients did, their reward ladder, and their
-portfolio. Behind a per-firm flag there is also a full project workspace —
-design boards, quotes, procurement, project finances — **off by default**.
+portfolio. The unit on that home page is the **client**, not the event — one row
+per person referred, their timeline behind the name, and what is sitting in
+their cart. It was a merged feed of everybody's events first, and that is the
+shape a log file has, not the shape the question has. Behind a per-firm flag
+there is also a full project workspace — design boards, quotes, procurement,
+project finances — **off by default**.
 
 `app/(console)/**` is Material Depot's own B2B team: an admin who verifies
 orders and issues logins, KAMs, outreach and inbound managers. Read
@@ -75,7 +79,7 @@ one address for you.
 | `app/login` | Email + password. Phone-OTP is the intended production login — see `docs/auth.md`. |
 | `app/api/catalog/search` | Server proxy to Material Depot's catalogue. **Blocked today by Cloudflare, with Django CSRF behind it** — `docs/catalogue.md`. |
 | `app/api/sync/referrals` | Push endpoint for referral events and orders. Service-role, shared-secret. |
-| `lib/domain/**` | The rules: money, quantity, areas, rewards, markets, the internal tiering. No I/O in here. |
+| `lib/domain/**` | The rules: money, quantity, areas, rewards, markets, the internal tiering, and the per-client referral rollup. No I/O in here. |
 | `lib/data/**` | Partner reads/writes (`queries.ts`, `actions.ts`), console reads/writes (`console-*.ts`), the `Result` type, the session and the role gates. |
 | `lib/auth/credentials.ts` | The one-time password generator. Never stored, never logged. |
 | `components/**` | `ui/` primitives, then one folder per module. `console/` is staff-only and must never be imported from `app/(app)/`. |
@@ -170,7 +174,7 @@ Module detail lives in `docs/`, read on demand:
 | `docs/quote.md` | Building a quote, markup, the client PDF, accepting |
 | `docs/procurement.md` | The list, quantity-vs-row progress, status auto-advance |
 | `docs/finance.md` | Why the ledger is hand-entered and not derived from the quote |
-| `docs/referrals.md` | The three systems referral data lives in, and the sync contract |
+| `docs/referrals.md` | The three systems referral data lives in, the sync contract, and why cart state is derived |
 | `docs/rewards.md` | The six tiers, cumulative unlocking, handover |
 | `docs/open-questions.md` | What is decided by default and needs a human to confirm |
 | `docs/landmines.md` | **Six bugs already shipped here**, kept because the shape of each recurs. Read before trusting a passing build. |

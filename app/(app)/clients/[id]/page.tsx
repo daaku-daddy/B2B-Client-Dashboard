@@ -6,6 +6,8 @@ import { ArrowRight, Mail, MapPin, Phone } from 'lucide-react'
 import { getClient, listProjects, listReferralEvents, listReferralOrders, listReferrals } from '@/lib/data/queries'
 import { PageHead } from '@/components/shell/PageHead'
 import { ReferralFeed } from '@/components/referrals/ReferralFeed'
+import { CartPanel } from '@/components/referrals/CartPanel'
+import { cartState } from '@/lib/domain/referrals'
 import { Badge, Card, CardHead, Empty, Problem, Stat } from '@/components/ui'
 import { STAGES } from '@/lib/domain/project'
 import { date, inr, inrShort } from '@/lib/format'
@@ -126,12 +128,24 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
               }
             />
           ) : (
-            <ReferralFeed
-              events={events.ok ? events.data : []}
-              names={new Map([[referral.id, c.name]])}
-              error={events.ok ? null : events.error}
-              emptyBody="Nothing has come through for them yet."
-            />
+            <>
+              {/* The cart first: a client with things in a cart and no order is
+                  the one state on this page that is worth a phone call today. */}
+              {events.ok ? (
+                <div className="border-b border-line">
+                  <CartPanel
+                    cart={cartState(events.data, orders.ok ? orders.data : [])}
+                    emptyBody="Nothing of theirs is sitting in a Material Depot cart right now."
+                  />
+                </div>
+              ) : null}
+              <ReferralFeed
+                events={events.ok ? events.data : []}
+                names={new Map([[referral.id, c.name]])}
+                error={events.ok ? null : events.error}
+                emptyBody="Nothing has come through for them yet."
+              />
+            </>
           )}
         </Card>
       </div>

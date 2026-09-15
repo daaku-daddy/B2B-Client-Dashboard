@@ -9,7 +9,9 @@ import {
 } from '@/components/ui'
 import { Modal } from '@/components/ui/Modal'
 import { ReferralFeed } from './ReferralFeed'
+import { CartPanel } from './CartPanel'
 import { OrderApprovalBadge } from './OrderApproval'
+import { summariseClients } from '@/lib/domain/referrals'
 import { createReferral, deleteReferral } from '@/lib/data/actions'
 import { date, inr, inrShort, relative } from '@/lib/format'
 
@@ -23,48 +25,51 @@ import { date, inr, inrShort, relative } from '@/lib/format'
  * credited, and it would sit there looking fine.
  */
 export function ReferralsView({
-  referrals, clients, events, orders, eventsError,
+  referrals, clients, events, orders, eventsError, initialOpenId,
 }: {
   referrals: Referral[]
   clients: Client[]
   events: ReferralEvent[]
   orders: ReferralOrder[]
   eventsError?: string | null
+  /** `?client=<referral id>`, so the dashboard can link straight to one. */
+  initialOpenId?: string | null
 }) {
   const router = useRouter()
   const [adding, setAdding] = useState(false)
-  const [openId, setOpenId] = useState<string | null>(null)
+  const [openId, setOpenId] = useState<string | null>(initialOpenId ?? null)
   const [error, setError] = useState<string | null>(null)
   const [pending, start] = useTransition()
   const [fromClient, setFromClient] = useState('')
 
   const names = useMemo(() => new Map(referrals.map((r) => [r.id, r.client_name])), [referrals])
 
+  // One rollup, shared with the dashboard's client list — a second copy of this
+  // arithmetic here is how the two screens start disagreeing about one client.
+  // The money inside it is `attributedSale`/`pendingSale`, which is what the
+  // rewards ladder is computed from, so a per-client figure cannot drift from
+  // the total it adds up to.
   const stats = useMemo(() => {
-    // `value` is APPROVED money only — it is what the rewards ladder is computed
-    // from, so a total here that included an unverified order would disagree with
-    // the Rewards page by exactly that order. `pending` is carried separately and
-    // shown as its own thing.
-    const byRef = new Map<string, { orders: number; value: number; pending: number; pendingCount: number; events: number; last: string | null }>()
-    for (const r of referrals) byRef.set(r.id, { orders: 0, value: 0, pending: 0, pendingCount: 0, events: 0, last: null })
-    for (const o of orders) {
-      const row = byRef.get(o.referral_id)
-      if (!row) continue
-      row.orders += 1
-      if (o.approval_status === 'approved') row.value += Number(o.order_value || 0)
-      else if (o.approval_status === 'pending') {
-        row.pending += Number(o.order_value || 0)
-        row.pendingCount += 1
-      }
-    }
-    for (const e of events) {
-      const row = byRef.get(e.referral_id)
-      if (!row) continue
-      row.events += 1
-      if (!row.last || e.occurred_at > row.last) row.last = e.occurred_at
-    }
-    return byRef
-  }, [referrals, orders, events])
+    const rows = summariseClients(referrals, events, orders)
+    return new Map(rows.map((r) => [r.referral.id, r]))
+  }, [referrals, events, orders])
+
+  /**
+   * Opening a client is addressable: `/referrals?client=<referral id>`, which
+   * is what the dashboard links to. `history.replaceState` rather than
+   * `router.replace` on purpose — this is the same route with the same data,
+   * and a push would re-run the page's four queries to render a panel that is
+   * already in memory. Back still leaves the page, which is what a browser
+   * Back on a landing-page drill-in should do.
+   */
+  function openClient(id: string | null) {
+    setOpenId(id)
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (id) url.searchParams.set('client', id)
+    else url.searchParams.delete('client')
+    window.history.replaceState(null, '', url.toString())
+  }
 
   const open = referrals.find((r) => r.id === openId) ?? null
 
@@ -90,19 +95,19 @@ export function ReferralsView({
     start(async () => {
       const res = await deleteReferral(id)
       if (!res.ok) return setError(res.error)
-      setOpenId(null)
+      openClient(null)
       router.refresh()
     })
   }
 
   if (open) {
     const s = stats.get(open.id)
-    const mine = events.filter((e) => e.referral_id === open.id)
-    const myOrders = orders.filter((o) => o.referral_id === open.id)
+    const mine = s?.events ?? []
+    const myOrders = s?.orders ?? []
     return (
       <>
         <button
-          onClick={() => setOpenId(null)}
+          onClick={() => openClient(null)}
           className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-ink-soft transition hover:text-brand"
         >
           <ArrowLeft size={14} /> All referrals
@@ -134,6 +139,14 @@ export function ReferralsView({
 
           <div className="space-y-4">
             <Card>
+              <CardHead
+                title="In their cart"
+                hint="The last cart we saw at a Material Depot store"
+              />
+              <CartPanel cart={s?.cart ?? { state: 'none' }} />
+            </Card>
+
+            <Card>
               <CardHead title="What they have bought" hint="Counts towards your rewards" />
               {myOrders.length === 0 ? (
                 <Empty title="No orders yet" body="Their orders will show here as they are placed." />
@@ -159,7 +172,7 @@ export function ReferralsView({
               )}
               <div className="flex items-center justify-between border-t border-line px-4 py-2.5">
                 <span className="text-xs font-medium text-ink-soft">Counting towards your rewards</span>
-                <span className="tnum text-sm font-semibold text-good">{inr(s?.value ?? 0)}</span>
+                <span className="tnum text-sm font-semibold text-good">{inr(s?.approved ?? 0)}</span>
               </div>
               {s?.pendingCount ? (
                 <p className="border-t border-line px-4 py-2 text-[11px] text-ink-faint">
@@ -207,7 +220,7 @@ export function ReferralsView({
                 <Th>Phone</Th>
                 <Th>Referred</Th>
                 <Th>Last seen</Th>
-                <Th className="text-right">Activity</Th>
+                <Th className="text-right">In cart</Th>
                 <Th className="text-right">Orders</Th>
                 <Th className="text-right">Value</Th>
               </tr>
@@ -218,17 +231,25 @@ export function ReferralsView({
                 return (
                   <tr
                     key={r.id}
-                    onClick={() => setOpenId(r.id)}
+                    onClick={() => openClient(r.id)}
                     className="cursor-pointer transition hover:bg-raised"
                   >
                     <Td className="font-medium">{r.client_name}</Td>
                     <Td className="tnum text-xs text-ink-soft">{r.md_phone}</Td>
                     <Td className="text-xs text-ink-soft">{date(r.referred_on)}</Td>
-                    <Td className="text-xs text-ink-soft">{s?.last ? relative(s.last) : '—'}</Td>
-                    <Td className="tnum text-right text-xs">{s?.events ?? 0}</Td>
-                    <Td className="tnum text-right text-xs">{s?.orders ?? 0}</Td>
+                    <Td className="text-xs text-ink-soft">{s?.lastSeen ? relative(s.lastSeen) : '—'}</Td>
+                    <Td className="tnum text-right text-xs">
+                      {s?.cart.state === 'open' ? (
+                        <span className="font-semibold text-brand">
+                          {s.cart.cart.value !== null ? inrShort(s.cart.cart.value) : 'open'}
+                        </span>
+                      ) : (
+                        <span className="text-ink-faint">—</span>
+                      )}
+                    </Td>
+                    <Td className="tnum text-right text-xs">{s?.orders.length ?? 0}</Td>
                     <Td className="tnum text-right text-xs font-semibold">
-                      {s?.value ? <span className="text-good">{inrShort(s.value)}</span> : <span className="text-ink-faint">—</span>}
+                      {s?.approved ? <span className="text-good">{inrShort(s.approved)}</span> : <span className="text-ink-faint">—</span>}
                     </Td>
                   </tr>
                 )

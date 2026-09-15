@@ -11,6 +11,7 @@
 import assert from 'node:assert/strict'
 import { partnerStanding, usageTier, engagement } from '../lib/domain/tiering.ts'
 import { attributedSale, pendingSale, rewardStatus } from '../lib/domain/rewards.ts'
+import { cartState, readCart, summariseClients } from '../lib/domain/referrals.ts'
 import { guessMarket, marketLabel } from '../lib/domain/markets.ts'
 import { generatePassword } from '../lib/auth/credentials.ts'
 
@@ -123,6 +124,170 @@ console.log('\n"All earned" and "there is no ladder" are different answers')
     assert.equal(mid.complete, false)
   })
 }
+
+console.log('\nCarts, which the sync does not send a state for')
+const ev = (e: Partial<any>) => ({
+  id: String(Math.random()), referral_id: 'r1', event_type: 'other', occurred_at: '2026-09-01T10:00:00Z',
+  store: null, title: null, detail: null, amount: null, payload: {},
+  external_id: String(Math.random()), synced_at: '2026-09-01T00:00:00Z',
+  ...e,
+}) as any
+
+const countCart = ev({
+  event_type: 'cart_add', occurred_at: '2026-09-02T10:00:00Z', store: 'Indiranagar',
+  title: 'Cart created - 3 items', detail: 'Oak plank, arctic white laminate, quartz.',
+  amount: 78400, payload: { items: 3 },
+})
+t('{"items": 3} is a count, and the prose is the contents', () => {
+  const c = readCart(countCart)
+  assert.equal(c.itemCount, 3)
+  assert.equal(c.value, 78400)
+  assert.deepEqual(c.lines, [])
+  assert.equal(c.summary, 'Oak plank, arctic white laminate, quartz.')
+})
+
+const listCart = ev({
+  event_type: 'cart_add', occurred_at: '2026-09-02T10:00:00Z', amount: 78400,
+  detail: 'Oak plank, laminate, quartz.',
+  payload: { items: [
+    { name: 'Engineered Oak Plank 14mm', sku: 'WF 4402', qty: 420, unit: 'sqft', rate: 142 },
+    { sku: 'LM 3301' },
+    { qty: 2 },
+  ] },
+})
+t('an itemised payload becomes lines, and the prose is dropped as a duplicate', () => {
+  const c = readCart(listCart)
+  assert.equal(c.itemCount, 3)
+  assert.equal(c.lines.length, 3)
+  assert.equal(c.summary, null)
+  assert.equal(c.lines[0].qty, 420)
+  assert.equal(c.lines[0].unit, 'sqft')
+})
+t('an item with no name is still an item — the count cannot understate the cart', () => {
+  const c = readCart(listCart)
+  assert.equal(c.lines[1].label, 'LM 3301')
+  assert.equal(c.lines[2].label, 'Item')
+  assert.equal(c.itemCount, 3)
+})
+
+t('a cart with nothing after it is open', () => {
+  const st = cartState([countCart])
+  assert.equal(st.state, 'open')
+})
+t('an order after it closes it', () => {
+  const st = cartState([countCart, ev({ event_type: 'order_placed', occurred_at: '2026-09-03T10:00:00Z' })])
+  assert.equal(st.state, 'ordered')
+})
+t('an order BEFORE it does not — that is a second cart being built', () => {
+  const st = cartState([countCart, ev({ event_type: 'order_placed', occurred_at: '2026-09-01T10:00:00Z' })])
+  assert.equal(st.state, 'open')
+})
+t('no cart at all is its own answer, not an empty one', () => {
+  assert.equal(cartState([ev({ event_type: 'store_visit' })]).state, 'none')
+})
+t('the newest cart is the one that counts', () => {
+  const st = cartState([
+    ev({ event_type: 'cart_add', occurred_at: '2026-08-01T10:00:00Z', amount: 1000, payload: { items: 1 } }),
+    ev({ event_type: 'cart_add', occurred_at: '2026-09-05T10:00:00Z', amount: 5000, payload: { items: 9 } }),
+    ev({ event_type: 'order_placed', occurred_at: '2026-08-02T10:00:00Z' }),
+  ])
+  assert.equal(st.state, 'open')
+  assert.equal(st.state === 'open' ? st.cart.value : null, 5000)
+})
+t('offsets are compared as instants, not as text', () => {
+  // 23:30 +05:30 is 18:00Z. As strings, "2026-09-09T23:30:00+05:30" sorts
+  // AFTER "2026-09-09T19:00:00+00:00" — which would leave a cart looking open
+  // an hour after the order that closed it.
+  const st = cartState([
+    ev({ event_type: 'cart_add', occurred_at: '2026-09-09T23:30:00+05:30', amount: 1000, payload: { items: 2 } }),
+    ev({ event_type: 'order_placed', occurred_at: '2026-09-09T19:00:00+00:00' }),
+  ])
+  assert.equal(st.state, 'ordered')
+})
+t('an order row with no matching event still closes the cart', () => {
+  // The sync takes events and orders as two independent arrays, and a producer
+  // may push only the order. Left to the event stream, this client would look
+  // like an open cart to chase for ever.
+  const st = cartState(
+    [countCart],
+    [order({ referral_id: 'r1', order_value: 78400, ordered_on: '2026-09-04' })],
+  )
+  assert.equal(st.state, 'ordered')
+})
+t('an order row DATED the cart day closes it — that is carting then buying in store', () => {
+  const st = cartState([countCart], [order({ ordered_on: '2026-09-02' })])
+  assert.equal(st.state, 'ordered')
+})
+t('an order row from before the cart leaves it open', () => {
+  const st = cartState([countCart], [order({ ordered_on: '2026-09-01' })])
+  assert.equal(st.state, 'open')
+})
+t('an order with no date cannot close anything', () => {
+  const st = cartState([countCart], [order({ ordered_on: null })])
+  assert.equal(st.state, 'open')
+})
+t('a pending order still means they bought — approval is about paying the architect', () => {
+  const st = cartState([countCart], [order({ ordered_on: '2026-09-05', approval_status: 'pending' })])
+  assert.equal(st.state, 'ordered')
+})
+t('a producer that knows the cart is still open overrules the guess', () => {
+  const st = cartState([
+    ev({ event_type: 'cart_add', occurred_at: '2026-09-02T10:00:00Z', payload: { items: 2, cart_status: 'open' } }),
+    ev({ event_type: 'order_placed', occurred_at: '2026-09-03T10:00:00Z' }),
+  ])
+  assert.equal(st.state, 'open')
+})
+
+console.log('\nOne row per referred client')
+const ref = (id: string, name: string, on: string) =>
+  ({ id, partner_id: 'p', client_id: null, project_id: null, client_name: name,
+     md_phone: '9800000000', referred_on: on, notes: null, created_at: on }) as any
+
+const rows = summariseClients(
+  [ref('r1', 'Rao', '2026-08-01'), ref('r2', 'Iyer', '2026-08-20'), ref('r3', 'Prakash', '2026-05-01')],
+  [
+    ev({ referral_id: 'r1', event_type: 'store_visit', occurred_at: '2026-09-02T09:00:00Z', store: 'Indiranagar' }),
+    ev({ referral_id: 'r1', event_type: 'cart_add', occurred_at: '2026-09-02T10:00:00Z', amount: 78400, payload: { items: 3 } }),
+    ev({ referral_id: 'r2', event_type: 'store_visit', occurred_at: '2026-09-09T09:00:00Z', store: 'Jayanagar' }),
+  ],
+  [
+    order({ referral_id: 'r1', order_value: 100000, approval_status: 'approved' }),
+    order({ referral_id: 'r1', order_value: 250000, approval_status: 'pending' }),
+    order({ referral_id: 'r2', order_value: 999999, approval_status: 'approved' }),
+  ],
+)
+t('most recently active first', () => assert.deepEqual(rows.map((r) => r.referral.id), ['r2', 'r1', 'r3']))
+t('a client who has done nothing still gets a row', () => {
+  const quiet = rows.find((r) => r.referral.id === 'r3')!
+  assert.equal(quiet.lastSeen, null)
+  assert.equal(quiet.cart.state, 'none')
+  assert.equal(quiet.approved, 0)
+})
+t('one client never picks up another client\'s events or orders', () => {
+  const rao = rows.find((r) => r.referral.id === 'r1')!
+  assert.equal(rao.events.length, 2)
+  assert.equal(rao.orders.length, 2)
+  assert.equal(rao.stores.join(), 'Indiranagar')
+})
+t('per-client money is the ladder\'s arithmetic — approved only, pending beside it', () => {
+  const rao = rows.find((r) => r.referral.id === 'r1')!
+  assert.equal(rao.approved, 100000)
+  assert.equal(rao.pending, 250000)
+  assert.equal(rao.pendingCount, 1)
+})
+t('and the per-client totals add up to the figure on the ladder', () => {
+  const all = [
+    order({ referral_id: 'r1', order_value: 100000, approval_status: 'approved' }),
+    order({ referral_id: 'r1', order_value: 250000, approval_status: 'pending' }),
+    order({ referral_id: 'r2', order_value: 999999, approval_status: 'approved' }),
+  ]
+  assert.equal(rows.reduce((s, r) => s + r.approved, 0), attributedSale(all))
+})
+t('an open cart is carried on the row, with its value', () => {
+  const rao = rows.find((r) => r.referral.id === 'r1')!
+  assert.equal(rao.cart.state, 'open')
+  assert.equal(rao.cart.state === 'open' ? rao.cart.cart.value : null, 78400)
+})
 
 console.log('\nOne-time passwords')
 t('no characters that can be misread aloud', () => {

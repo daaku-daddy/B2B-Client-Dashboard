@@ -6,7 +6,14 @@ import { Problem, Stat } from '@/components/ui'
 import { attributedSale, pendingSale, rewardStatus } from '@/lib/domain/rewards'
 import { inr, inrShort } from '@/lib/format'
 
-export default async function ReferralsPage() {
+export default async function ReferralsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ client?: string }>
+}) {
+  // `?client=<referral id>` opens straight onto that client. The dashboard's
+  // list links here, and a partner can send the link to a colleague.
+  const { client } = await searchParams
   const [referrals, clients, tiers, claims] = await Promise.all([
     listReferrals(), listClients(), listRewardTiers(), listRewardClaims(),
   ])
@@ -71,6 +78,7 @@ export default async function ReferralsPage() {
           events={events.ok ? events.data : []}
           orders={orders.ok ? orders.data : []}
           eventsError={events.ok ? null : events.error}
+          initialOpenId={client ?? null}
         />
       </div>
     </>

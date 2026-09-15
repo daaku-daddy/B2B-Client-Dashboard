@@ -8,7 +8,7 @@ import {
 import { attributedSale, pendingSale, rewardStatus } from '@/lib/domain/rewards'
 import { RewardTrack } from '@/components/rewards/RewardTrack'
 import { PageHead } from '@/components/shell/PageHead'
-import { ReferralFeed } from '@/components/referrals/ReferralFeed'
+import { ClientActivity } from '@/components/referrals/ClientActivity'
 import { KamCard } from '@/components/partner/KamCard'
 import { ActivityFeed } from '@/components/partner/ActivityFeed'
 import { Badge, Button, Card, CardHead, Empty, Problem, Stat } from '@/components/ui'
@@ -24,6 +24,12 @@ import { STAGES } from '@/lib/domain/project'
  * (`partner.workspace_enabled`); for everyone else this page never mentions
  * boards, quotes or margins, because a landing page that opens with six empty
  * modules reads as homework.
+ *
+ * The middle of the page is a list of the clients this firm referred, not a
+ * merged stream of every event from all of them. The stream was the first cut
+ * and it was the wrong unit: four clients' visits, views and orders interleaved
+ * newest-first is a log file, and the question is per person. `ClientActivity`
+ * holds the list and the drill-in.
  */
 export default async function DashboardPage() {
   const session = await currentSession()
@@ -35,9 +41,13 @@ export default async function DashboardPage() {
   ])
 
   const refIds = referrals.ok ? referrals.data.map((r) => r.id) : []
+  // The whole history, not the newest handful: this page now rolls the events
+  // up PER CLIENT — last seen, which stores, what is in their cart — and the
+  // twelve most recent events across everybody would have left a client whose
+  // cart is a month old looking like they had never been in.
   const [orders, events, projects, clients] = await Promise.all([
     listReferralOrders(refIds),
-    listReferralEvents(refIds, 12),
+    listReferralEvents(refIds),
     workspace ? listProjects() : Promise.resolve({ ok: true as const, data: [] }),
     workspace ? listClients() : Promise.resolve({ ok: true as const, data: [] }),
   ])
@@ -109,27 +119,26 @@ export default async function DashboardPage() {
         </div>
 
         <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
-          <Card>
-            <CardHead
-              title="Your referred clients"
-              hint="What they did at Material Depot"
-              action={
-                <Link href="/referrals" className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline">
-                  All activity <ArrowRight size={12} />
-                </Link>
-              }
-            />
-            <ReferralFeed
-              events={events.ok ? events.data : []}
-              names={referrals.ok ? new Map(referrals.data.map((r) => [r.id, r.client_name])) : new Map()}
-              error={events.ok ? null : events.error}
-              emptyBody={
-                refIds.length
-                  ? 'Nothing has come through for your referred clients yet. Visits, carts and orders appear here as they happen.'
-                  : 'Tell us about a client and everything they do with us — store visits, carts, orders — shows up here.'
-              }
-            />
-          </Card>
+          <ClientActivity
+            referrals={referrals.ok ? referrals.data : []}
+            events={events.ok ? events.data : []}
+            orders={orders.ok ? orders.data : []}
+            eventsError={events.ok ? null : events.error}
+            ordersError={orders.ok ? null : orders.error}
+            hint="Tap a name for their visits, their cart and their orders"
+            linkBase="/referrals?client="
+            action={
+              <Link href="/referrals" className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline">
+                All clients <ArrowRight size={12} />
+              </Link>
+            }
+            emptyBody="Tell us about a client and everything they do with us — store visits, what they looked at, what is in their cart, what they ordered — shows up against their name here."
+            emptyAction={
+              <Link href="/referrals" className="text-sm font-medium text-brand hover:underline">
+                Refer your first client →
+              </Link>
+            }
+          />
 
           <div className="space-y-5">
             <KamCard kam={kam.ok ? kam.data : null} error={kam.ok ? null : kam.error} />

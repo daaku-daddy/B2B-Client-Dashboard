@@ -23,6 +23,7 @@ enough that changing it is expensive.
 | 15 | How long before a firm "needs reactivating"? | 90 days with no verified order — `DORMANT_AFTER_DAYS`. The brief said three months. "Never ordered" is kept as a separate third state, not folded into dormant. |
 | 16 | What does the inbound manager's flow look like? | **Unanswered.** Inbound currently gets the same prospect pipeline as outreach, with no market restriction. The brief named the role and not the flow, so this is a placeholder that works rather than a design. |
 | 17 | Can one firm have several logins? | Still not self-serve — `partner_user` has no insert policy. An admin can now issue a *replacement* password from the console, which covers the case that actually came up (a firm that cannot get in), but not a second seat. |
+| 18 | Is a referred client's cart still open? | **Derived, and conservatively.** Nothing in the sync says. The newest `cart_add` counts as converted once an `order_placed` event or a dated `referral_order` row lands at or after it; otherwise it reads as open. A producer can overrule it outright with `payload.cart_status`. Erring towards "open" is deliberate — a wrongly-open cart costs an awkward phone call, a wrongly-closed one costs the sale nobody chased. `docs/referrals.md`. |
 
 ## Known gaps, named rather than faked
 

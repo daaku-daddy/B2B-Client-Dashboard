@@ -2,11 +2,12 @@ import Link from 'next/link'
 import { ArrowLeft, Eye, EyeOff } from 'lucide-react'
 import { Badge, Card, CardHead, Empty, Problem, Stat, Table, Td, Th } from '@/components/ui'
 import { RewardTrack } from '@/components/rewards/RewardTrack'
-import { ReferralFeed } from '@/components/referrals/ReferralFeed'
+import { ClientActivity } from '@/components/referrals/ClientActivity'
 import { ActivityFeed } from '@/components/partner/ActivityFeed'
 import { KamCard } from '@/components/partner/KamCard'
 import { OrderApprovalBadge } from '@/components/referrals/OrderApproval'
 import { attributedSale, pendingSale, rewardStatus } from '@/lib/domain/rewards'
+import { summariseClients } from '@/lib/domain/referrals'
 import type {
   MyKam, Partner, PartnerActivity, PortfolioItem, Referral, ReferralEvent, ReferralOrder,
   RewardClaim, RewardTier,
@@ -84,18 +85,10 @@ export function PartnerAsSeen({
 
   const names = new Map(referrals.map((r) => [r.id, r.client_name]))
 
-  const perClient = referrals.map((r) => {
-    const mine = orders.filter((o) => o.referral_id === r.id)
-    const lastEvent = events.find((e) => e.referral_id === r.id) ?? null
-    return {
-      referral: r,
-      orders: mine.length,
-      value: mine.filter((o) => o.approval_status === 'approved')
-        .reduce((s, o) => s + (Number(o.order_value) || 0), 0),
-      pending: mine.filter((o) => o.approval_status === 'pending').length,
-      last: lastEvent?.occurred_at ?? null,
-    }
-  })
+  // The firm's own rollup, not a second one written for the console. Whatever a
+  // support call reads out per client — their cart, what is counted, when they
+  // were last in — has to be the figure on the architect's screen.
+  const perClient = summariseClients(referrals, events, orders)
 
   return (
     <div className="space-y-5">
@@ -168,18 +161,14 @@ export function PartnerAsSeen({
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
-        <Card>
-          <CardHead title="Their referred clients" hint="What those clients did at Material Depot" />
-          <ReferralFeed
-            events={events}
-            names={names}
-            emptyBody={
-              referrals.length
-                ? 'Nothing has come through for their referred clients yet. Visits, carts and orders appear here as they happen — which today means nothing is pushing to /api/sync/referrals.'
-                : 'They have not told us about a client yet, so there is nothing to show them.'
-            }
-          />
-        </Card>
+        <ClientActivity
+          referrals={referrals}
+          events={events}
+          orders={orders}
+          title="Their referred clients"
+          hint="Tap a name for that client's visits, cart and orders — as the firm sees it"
+          emptyBody="They have not told us about a client yet, so there is nothing to show them."
+        />
 
         <div className="space-y-5">
           <KamCard kam={kam} />
@@ -229,7 +218,8 @@ export function PartnerAsSeen({
           <Table className="min-w-[680px]">
             <thead>
               <tr>
-                <Th>Client</Th><Th>Referred</Th><Th className="text-right">Orders</Th>
+                <Th>Client</Th><Th>Referred</Th><Th className="text-right">In cart</Th>
+                <Th className="text-right">Orders</Th>
                 <Th className="text-right">Counted</Th><Th>Last activity</Th>
               </tr>
             </thead>
@@ -242,13 +232,22 @@ export function PartnerAsSeen({
                   </Td>
                   <Td className="text-xs text-ink-soft">{date(row.referral.referred_on)}</Td>
                   <Td className="tnum text-right text-xs">
-                    {row.orders || '—'}
-                    {row.pending ? <Badge tone="warn" className="ml-1">{row.pending} being checked</Badge> : null}
+                    {row.cart.state === 'open' ? (
+                      <span className="font-semibold text-brand">
+                        {row.cart.cart.value !== null ? inrShort(row.cart.cart.value) : 'open'}
+                      </span>
+                    ) : (
+                      <span className="text-ink-faint">—</span>
+                    )}
+                  </Td>
+                  <Td className="tnum text-right text-xs">
+                    {row.orders.length || '—'}
+                    {row.pendingCount ? <Badge tone="warn" className="ml-1">{row.pendingCount} being checked</Badge> : null}
                   </Td>
                   <Td className="tnum text-right text-xs font-medium text-good">
-                    {row.value ? inr(row.value) : '—'}
+                    {row.approved ? inr(row.approved) : '—'}
                   </Td>
-                  <Td className="text-xs text-ink-soft">{row.last ? relative(row.last) : '—'}</Td>
+                  <Td className="text-xs text-ink-soft">{row.lastSeen ? relative(row.lastSeen) : '—'}</Td>
                 </tr>
               ))}
             </tbody>
