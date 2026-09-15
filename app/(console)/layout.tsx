@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation'
 import { currentActor } from '@/lib/data/session'
 import { Sidebar } from '@/components/shell/Sidebar'
-import { consoleNav } from '@/components/shell/nav'
 import { Problem } from '@/components/ui'
 import { marketLabel } from '@/lib/domain/markets'
 
@@ -61,7 +60,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   return (
     <div className="flex min-h-dvh flex-col md:flex-row">
       <Sidebar
-        items={consoleNav(staff.role)}
+        nav={{ kind: 'console', role: staff.role }}
         eyebrow="B2B Console"
         tone="ink"
         footerTitle={`${staff.name} · ${ROLE_LABEL[staff.role]}`}

@@ -179,3 +179,42 @@ arrive subtly different. Keep files that humans paste boring and ASCII.
 And the diagnostic that actually paid: query the live tables to see how far it
 got. Six empty tables said "atomic failure, safe to retry" in one request, and
 the same check proved 003 and 004 had landed.
+
+---
+
+## 2026-09-15 · A nav array crossed the server/client boundary and 500'd every page
+
+`Sidebar` is a client component. It used to `import { NAV } from './nav'`
+itself, so the Lucide icons on each item never left the client bundle. Making it
+serve two apps, it was changed to take `items: NavItem[]` as a prop — computed in
+a Server Component layout.
+
+A `NavItem` carries `icon`, which is a React component. Functions cannot be
+serialised across the boundary, so every render threw:
+
+```
+Functions cannot be passed directly to Client Components
+  {$$typeof: ..., render: function LayoutDashboard}
+```
+
+*From the user's side:* a black "This page couldn't load — A server error
+occurred" on **every page of both apps**. Not the console alone: the partner app
+took the same prop and broke identically.
+
+`npm run typecheck`, `npm run build`, 108 RLS assertions and 29 domain
+assertions all passed, and so did every data query when probed directly with a
+real user's JWT. Nothing but loading the page in a browser found it.
+
+The fix: `Sidebar` takes `nav={{ kind: 'partner', workspaceEnabled }}` or
+`nav={{ kind: 'console', role }}` — plain serialisable data — and calls
+`partnerNav()` / `consoleNav()` itself.
+
+**The shape:** moving a computation from inside a client component up into a
+server one, when its result contains anything that is not plain data. Components,
+functions, class instances, `Date` methods. The tell is a prop whose type comes
+from a module that imports an icon library. It compiles, it type-checks, and it
+fails on first render.
+
+Second lesson, and the one worth keeping: the deploy went green, the data layer
+verified clean from the command line, and the app was still completely broken.
+`docs/landmines.md` keeps saying "and then look at it" — this is why.

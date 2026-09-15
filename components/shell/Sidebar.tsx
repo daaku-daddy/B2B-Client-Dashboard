@@ -3,7 +3,8 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { LogOut } from 'lucide-react'
-import type { NavItem } from './nav'
+import { consoleNav, partnerNav } from './nav'
+import type { StaffRole } from '@/lib/domain/types'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { cn } from '@/lib/cn'
 
@@ -12,15 +13,28 @@ import { cn } from '@/lib/cn'
  * deliberately not styled differently for its own sake — but the eyebrow says
  * which one you are in, because a KAM and a partner can be signed in on the same
  * laptop and "whose screen am I looking at" has to be answerable at a glance.
+ *
+ * **`nav` describes which list to build; it is never the list itself.** A
+ * `NavItem` carries a Lucide `icon`, which is a React component — a function.
+ * Functions cannot cross the server/client boundary, so a layout passing
+ * `items={consoleNav(role)}` throws *Functions cannot be passed directly to
+ * Client Components* at render time and every page under that layout 500s.
+ * `tsc` and `next build` both pass; only loading the page finds it. So the nav
+ * is resolved HERE, inside the client component, from plain serialisable data.
+ * See docs/landmines.md.
  */
+type NavSpec =
+  | { kind: 'partner'; workspaceEnabled: boolean }
+  | { kind: 'console'; role: StaffRole }
+
 export function Sidebar({
-  items,
+  nav,
   eyebrow,
   footerTitle,
   footerSub,
   tone = 'brand',
 }: {
-  items: NavItem[]
+  nav: NavSpec
   eyebrow: string
   footerTitle: string
   footerSub: string | null
@@ -28,6 +42,11 @@ export function Sidebar({
 }) {
   const path = usePathname()
   const router = useRouter()
+
+  const items =
+    nav.kind === 'console'
+      ? consoleNav(nav.role)
+      : partnerNav({ workspace_enabled: nav.workspaceEnabled })
 
   async function signOut() {
     await supabaseBrowser().auth.signOut()

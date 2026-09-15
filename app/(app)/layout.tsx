@@ -2,7 +2,6 @@ import { redirect } from 'next/navigation'
 import { currentActor } from '@/lib/data/session'
 import { Sidebar } from '@/components/shell/Sidebar'
 import { Onboarding } from '@/components/shell/Onboarding'
-import { partnerNav } from '@/components/shell/nav'
 import { Problem } from '@/components/ui'
 
 /**
@@ -46,7 +45,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-dvh flex-col md:flex-row">
       <Sidebar
-        items={partnerNav(partner)}
+        nav={{ kind: 'partner', workspaceEnabled: partner.workspace_enabled }}
         eyebrow="for Partners"
         footerTitle={partner.firm_name}
         footerSub={email ?? partner.phone}
