@@ -140,3 +140,42 @@ test did nothing. Three separate ways to get it — writing the value that is
 already there, tripping an earlier guard than the one you mean, and counting
 rows when a documented exception is in the count. Make the write a real change,
 assert the specific refusal, and name the rows.
+
+---
+
+## 2026-09-15 · Valid SQL that a real Postgres ran, and the SQL Editor would not
+
+`seed/002_console.sql` applied cleanly against Postgres 18 in `supabase/test`,
+and died in the Supabase SQL Editor with:
+
+```
+ERROR: 42P01: relation "another" does not exist
+```
+
+`another` is a word from the middle of a string literal —
+`'Locked into another supplier until next year.'`. For Postgres to read
+`into another` as a table reference, the quoting had to be off by the time it
+reached that line. Checked and ruled out: the file is byte-identical to raw
+GitHub, a proper lexer says every quote and `$$` is balanced, there are no curly
+quotes, and the line numbers in the editor matched the file exactly, so the paste
+was complete.
+
+Nothing was written — all six tables were still empty afterwards — so the
+failure was at least atomic.
+
+Rather than chase the client, the file was rewritten so there is nothing to lose
+track of: plain ASCII throughout (it had em dashes, an en dash, `->` arrows, a
+rupee sign and an `é`), no `$$` block (the one `do` block became a plain
+`select`), no apostrophes in prose comments, and no semicolons inside string
+literals. It then ran first time.
+
+**The shape:** "it is valid SQL" and "it will survive the trip to the server" are
+different claims, and only the first one is testable here. Hand-pasted SQL passes
+through a clipboard, a browser and an editor before it is parsed. Anything whose
+meaning depends on exact quoting — an apostrophe in prose, a semicolon in a
+string, a multi-byte character, a dollar-quoted block — is a thing that can
+arrive subtly different. Keep files that humans paste boring and ASCII.
+
+And the diagnostic that actually paid: query the live tables to see how far it
+got. Six empty tables said "atomic failure, safe to retry" in one request, and
+the same check proved 003 and 004 had landed.
