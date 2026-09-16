@@ -11,9 +11,9 @@ apply a change to it.
 |---|---|---|
 | `001_init.sql` | Tables, indexes, the six reward tiers, `updated_at` triggers | ☑ 2026-09-11 |
 | `002_rls.sql` | RLS on every table, ownership helper functions, `onboard_partner()` | ☑ 2026-09-11 |
-| `003_roles.sql` | `staff_user`, partner lifecycle columns, the order approval gate, onboarding forms, the outreach pipeline, portfolios, partner activity | ☐ |
-| `004_roles_rls.sql` | Policies for all of the above, the partner field guard, `review_referral_order()`, `review_portfolio_item()`, `my_kam()` | ☐ |
-| `005_studio.sql` | **PRD v1.1.** The columns the incentive formula cannot run without (per-order coupon, discount availed, delivery date), the §9.2 referral form fields and consent, escalations + their thread, theming, notification preferences, the phone-reveal log, Appendix B reason codes, `review_referral()`, `referral_phone_taken()` | ☐ |
+| `003_roles.sql` | `staff_user`, partner lifecycle columns, the order approval gate, onboarding forms, the outreach pipeline, portfolios, partner activity | ☑ 2026-09-15 |
+| `004_roles_rls.sql` | Policies for all of the above, the partner field guard, `review_portfolio_item()`, `my_kam()` (its `review_referral_order()` was replaced by 005) | ☑ 2026-09-15 |
+| `005_studio.sql` | **PRD v1.1.** The columns the incentive formula cannot run without (per-order coupon, discount availed, delivery date), the §9.2 referral form fields and consent, escalations + their thread, theming, notification preferences, the phone-reveal log, Appendix B reason codes, `review_referral()`, `referral_phone_taken()` | ☑ 2026-09-16 |
 | `../seed/001_demo.sql` | Demo data — a firm, 4 clients, 5 projects, boards, quotes, procurement, ledger, referrals, rewards | ☐ |
 | `../seed/002_console.sql` | Demo console data — the team, two more firms, prospects, onboarding forms, portfolios, activity | ☐ |
 
@@ -49,6 +49,18 @@ changing any policy.
 Tick the box in this table when you have run it, and say so in the commit. A
 migration committed here is **not** evidence it was applied — if a column is
 missing at runtime, check the live table before assuming the code is wrong.
+
+Neither is a tick, on its own. Every box above was confirmed by **probing the
+live project over PostgREST** with the service-role key — selecting each new
+column, hitting each new table, and calling each new function to see whether it
+404s (missing) or 403s with its own permission message (present and enforcing).
+003 and 004 sat unticked here for a day after they had actually shipped, which
+is the same failure in the other direction.
+
+**Applied is not populated.** 005's columns exist and nothing fills them: every
+order is missing `delivered_on` and `discount_availed`, every referral has
+`consent_given` null. The app reads all three as *unknown* and says so, which is
+correct. The producer that changes that is the CRM bridge — `docs/referrals.md`.
 
 ## Which project
 

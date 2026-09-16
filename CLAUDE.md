@@ -53,10 +53,19 @@ job rather than an hour of data entry.
 
 **No SQL in this repo runs itself.** `supabase/migrations/*.sql` and
 `supabase/seed/001_demo.sql` are pasted into the Supabase SQL Editor by hand.
-001–004 were applied on 2026-09-11; **`005_studio.sql` has not been applied
-yet**. `supabase/migrations/README.md` is the checklist, says which of the three
-Material Depot Supabase projects this one is, and describes exactly how the app
-degrades while 005 is outstanding.
+001–004 were applied on 2026-09-11, **005 on 2026-09-16** — verified by probing
+every column, table and function over PostgREST rather than by being told.
+`supabase/migrations/README.md` is the checklist and says which of the three
+Material Depot Supabase projects this one is.
+
+**Applied is not the same as populated.** 005 added the columns the incentive
+programme needs; nothing fills them yet. On production today every order is
+missing `delivered_on` and `discount_availed`, and every referral has
+`consent_given` null — so maturity reads "awaiting a delivery date", net
+cashback is withheld in favour of gross, and every client shows §14.5's
+aggregate view. That is the app being correct about an empty input, not a bug,
+and the producer that fixes it is the CRM bridge in
+`materialdepot-crm/docs/b2b/partner-bridge.md`.
 
 **A migration committed here is not evidence it was applied.** If a column is
 missing at runtime, check the live table before assuming the code is wrong. And
