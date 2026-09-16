@@ -245,3 +245,94 @@ was obeyed at the data layer — the read returned `Result` and the page rendere
 and completion collapse into the same sentinel. Any `find() ?? null` whose null
 answers two questions. Found by rendering the component against a fixture with
 no tiers, which took two minutes and is the only reason it was not shipped.
+
+---
+
+## 12. A `useMemo` added below an early return
+
+`tsc` passed. `next build` passed. Every page rendered. Opening one client threw
+**"Rendered fewer hooks than expected"** and the whole route went to the error
+overlay.
+
+`ReferralsView` returns early when a client is open. The §9.1 list filtering was
+added as a `useMemo` further down the file, *after* that return, so the hook ran
+on the list and did not run on the detail view. React counts hooks; two different
+counts for one component is a crash, not a warning.
+
+**The shape:** a component with an early return is a component where "add the
+memo next to where it is used" is wrong. Every hook goes above every `return`.
+
+Found by clicking a client. Neither of the two gates that pass before you click
+can see it.
+
+## 13. Our own brand colour failed the contrast rule we were about to enforce
+
+§13.3 requires WCAG AA on partner themes. The first run of the preset test
+failed on `Material Depot` itself: `#c4581c` measures **4.41:1** against white
+and AA needs 4.5 for normal text. It had shipped that way from the start and
+nobody had noticed, because 4.41 and 4.5 look identical.
+
+Fixed the colour (`#bd5318`, 4.76:1) rather than exempting the default from the
+rule. **The shape:** a rule you are about to apply to other people is worth
+running against yourself first — and a contrast ratio is the kind of thing only
+a function can see.
+
+## 14. "No order yet" next to "Placed an order: Yes"
+
+`valueBand(0)` returned `'No order yet'`. On a client with two orders that had
+not matured, the consent-limited panel rendered:
+
+> Placed an order — **Yes**
+> Value so far — **No order yet**
+
+Two orders had been placed; nothing had *counted*. Zero-counted and never-ordered
+are different facts and the band label conflated them. Now `'Nothing yet'`, and
+the row is labelled "Counting towards your rewards".
+
+**The shape:** a formatter that phrases its own zero case will eventually be used
+somewhere that zero means something else. Keep the label at the call site.
+
+## 15. A chart label drawn over the bar it was labelling
+
+The revenue trend draws slab thresholds as reference lines with the figure at the
+right-hand end. The labels were absolutely positioned inside the plot, so the
+moment a month reached the band being labelled — the exact month a partner looks
+at the chart for — the bar covered the text.
+
+The threshold labels now have their own 56px column. **The shape:** an overlay
+that is legible in the empty state is not evidence it is legible with data in it.
+
+## 16. Grey meant two opposite things on the same chart
+
+The same chart painted pre-programme months in `bg-line` and Silver Coin months
+in `bg-silver`. Both are grey. The caption read *"Grey bars are before the
+programme started and carry no reward value"* — pointing directly at the month
+that had earned a Silver Coin.
+
+Pre-programme months are now an outline, and the caption names both. **The
+shape:** a legend that describes a colour rather than a treatment breaks the
+moment two things in the palette are the same colour family.
+
+## 17. An RLS test that passed because the write changed nothing
+
+`update referral set consent_given = true` against a row where it was already
+`true` is allowed by `referral_guard_md_fields()` — the guard compares with `is
+distinct from`, so a no-op update is correctly not a change. The first version of
+the test asserted a firm could not set that column and wrote the value that was
+already there, so the guard never fired and the suite reported a leak.
+
+Asserted as a **change** now (`true` → `false`, and claiming consent on a client
+who has not given it). **The shape:** a negative test has to attempt something
+that would actually differ.
+
+## 18. A policy-less UPDATE does not raise
+
+Three new assertions failed with "IT WENT THROUGH" against tables that have no
+UPDATE policy for a partner at all. They had not gone through: RLS filters the
+row out and Postgres reports success against **zero rows**.
+
+The suite's `blocked()` helper only understands exceptions, so it scored a
+correctly-refused write as a pass in the other direction. Added `unchanged()`,
+which asserts `rowCount === 0`. **The shape:** "refused" has two shapes in
+Postgres, and a table whose only defence is the *absence* of a policy gets the
+quiet one.

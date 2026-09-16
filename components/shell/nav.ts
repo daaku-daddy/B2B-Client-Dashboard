@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   Award, Building2, ClipboardCheck, GalleryVerticalEnd, LayoutDashboard,
-  Palette, PhoneCall, ShieldCheck, UserPlus, Users, UsersRound,
+  Palette, PhoneCall, Settings, ShieldCheck, UserPlus, Users, UsersRound,
 } from 'lucide-react'
 import type { Partner, StaffRole } from '@/lib/domain/types'
 
@@ -10,7 +10,7 @@ export type NavItem = { href: string; label: string; icon: LucideIcon; blurb: st
 /**
  * What a partner sees.
  *
- * Four items, always. Referred clients, rewards and portfolio are the whole
+ * Five items, always. Referred clients, rewards and portfolio are the whole
  * proposition on day one — see what your clients did with us, see what you have
  * earned, get your work on our site — and none of them asks a designer to move
  * anything they already have somewhere else.
@@ -27,6 +27,7 @@ const PARTNER_CORE: NavItem[] = [
   { href: '/referrals', label: 'Your clients', icon: Building2, blurb: 'What they did at Material Depot' },
   { href: '/rewards', label: 'Rewards', icon: Award, blurb: 'Your incentive ladder' },
   { href: '/portfolio', label: 'Portfolio', icon: GalleryVerticalEnd, blurb: 'Your work, on our site' },
+  { href: '/settings', label: 'Settings', icon: Settings, blurb: 'Your studio, your team, your theme' },
 ]
 
 const PARTNER_WORKSPACE: NavItem[] = [

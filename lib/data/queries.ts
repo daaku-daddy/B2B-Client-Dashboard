@@ -3,7 +3,7 @@ import { fail, ok, type Result } from './result'
 import type {
   Board, BoardItem, Client, FinanceEntry, ProcurementItem, Project, ProjectArea,
   Quote, QuoteLine, Referral, ReferralEvent, ReferralOrder, RewardClaim, RewardTier,
-  PortfolioItem, PartnerActivity,
+  PortfolioItem, PartnerActivity, Escalation, EscalationComment, NotificationPref,
 } from '@/lib/domain/types'
 
 /**
@@ -160,4 +160,39 @@ export const listActivity = (limit = 50) =>
   many<PartnerActivity>(
     (sb) => sb.from('partner_activity').select('*').order('occurred_at', { ascending: false }).limit(limit),
     'your account history',
+  )
+
+// ------------------------------------------------------------- escalations
+
+/**
+ * PRD §9.4. Read by the Clients module AND by the reward path: an OPEN
+ * escalation against an order holds that order's maturation (§10.5), so
+ * `openEscalationsByOrder()` feeds `LedgerOrder.open_escalations`.
+ */
+export const listEscalations = () =>
+  many<Escalation>(
+    (sb) => sb.from('escalation').select('*').order('raised_at', { ascending: false }),
+    'your escalations',
+  )
+
+export const listEscalationComments = (escalationIds: string[]) =>
+  escalationIds.length
+    ? many<EscalationComment>(
+        (sb) =>
+          sb.from('escalation_comment').select('*').in('escalation_id', escalationIds).order('created_at'),
+        'the replies on your escalations',
+      )
+    : Promise.resolve(ok<EscalationComment[]>([]))
+
+/**
+ * Open escalations, counted per order.
+ *
+ * There is deliberately no `.eq('internal', false)` or any other filter here —
+ * the hiding is a POLICY (`005_studio.sql`). A filter in a query is one
+ * forgotten call away from a leak, and the RLS suite checks the policy by name.
+ */
+export const listNotificationPrefs = () =>
+  one<NotificationPref>(
+    (sb) => sb.from('notification_pref').select('*').maybeSingle(),
+    'your notification settings',
   )

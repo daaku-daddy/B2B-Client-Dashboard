@@ -646,23 +646,97 @@ on conflict (id) do update set
 -- order counts towards the reward ladder. One of these is deliberately left
 -- `pending` so the admin console has something real in its queue and the demo
 -- firm can see what "being verified" looks like from their side.
-insert into referral_order (id, referral_id, md_enq_id, order_value, ordered_on, store, status, approval_status, approved_at) values
+insert into referral_order (
+  id, referral_id, md_enq_id, order_value, ordered_on, delivered_on, store, status,
+  approval_status, approved_at, coupon_code, discount_availed
+) values
+  -- July: delivered, past the 30-day window, so this month is CONFIRMED and it
+  -- carries the Silver Coin. ₹2,68,000 lands in the ₹2,00,001–₹5,00,000 slab.
+  ('cccccccc-cccc-4ccc-8ccc-cccccccccc04', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01', 'ENQ2026071559023',
+   268000, current_date - 62, current_date - 55, 'Whitefield', 'Delivered', 'approved', now() - interval '60 days',
+   'MDPRO2', 5360),
+
+  -- August: delivered recently, so it is still inside the 30 days and the month
+  -- reads PROVISIONAL. This is the state most months are in most of the time.
   ('cccccccc-cccc-4ccc-8ccc-cccccccccc01', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01', 'ENQ2026072884321',
-   384500, current_date - 30, 'Whitefield', 'Delivered', 'approved', now() - interval '28 days'),
+   384500, current_date - 30, current_date - 26, 'Whitefield', 'Delivered', 'approved', now() - interval '28 days',
+   'MDPRO2', 7690),
+
+  -- September: still with an admin, and deliberately carrying NO coupon data.
+  -- That is what makes the month's net cashback unstateable, which is the
+  -- §10.4 integration dependency showing up honestly on screen rather than
+  -- being quietly computed as if no discount had been taken.
   ('cccccccc-cccc-4ccc-8ccc-cccccccccc02', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01', 'ENQ2026080691204',
-   142000, current_date - 9, 'Whitefield', 'Partially delivered', 'pending', null),
+   142000, current_date - 9, null, 'Whitefield', 'Partially delivered', 'pending', null,
+   null, null),
+
+  -- June: BEFORE the go-live date in lib/domain/programme.ts. Real business,
+  -- shown in the client's timeline, worth nothing towards a reward — which is
+  -- the single most likely month-one dispute (§18) and the reason it is in the
+  -- demo at all.
   ('cccccccc-cccc-4ccc-8ccc-cccccccccc03', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa03', 'ENQ2026060471183',
-   96000, current_date - 97, 'Sarjapur', 'Delivered', 'approved', now() - interval '95 days')
+   96000, current_date - 97, current_date - 90, 'Sarjapur', 'Delivered', 'approved', now() - interval '95 days',
+   'MDPRO1', 960)
 on conflict (id) do update set
   md_enq_id = excluded.md_enq_id, order_value = excluded.order_value,
-  ordered_on = excluded.ordered_on, store = excluded.store, status = excluded.status,
-  approval_status = excluded.approval_status, approved_at = excluded.approved_at;
+  ordered_on = excluded.ordered_on, delivered_on = excluded.delivered_on,
+  store = excluded.store, status = excluded.status,
+  approval_status = excluded.approval_status, approved_at = excluded.approved_at,
+  coupon_code = excluded.coupon_code, discount_availed = excluded.discount_availed;
+
+-- ------------------------------------------------- 10b. consent and escalations
+
+-- §14.5's three consent states, all three present on purpose. Sharma and
+-- Prakash have confirmed; Rao has not been asked yet (null, NOT false) and
+-- renders the limited aggregate view; Iyer said no.
+update referral set status = 'active', consent_given = true,  consent_at = now() - interval '40 days'
+ where id in ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa03');
+update referral set status = 'approved', consent_given = null
+ where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa02';
+update referral set status = 'submitted', consent_given = false, consent_at = now() - interval '5 days'
+ where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa04';
+
+update referral set project_type = 'residential', budget_band = '₹15 – 30 L',
+       timeline = 'Within a month', city = 'Bengaluru', locality = 'Whitefield',
+       categories = array['Tiles','Wooden flooring','Laminates']
+ where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01';
+update referral set project_type = 'commercial', budget_band = '₹10 – 25 L',
+       city = 'Bengaluru', locality = 'Sarjapur', categories = array['Tiles']
+ where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa03';
+
+-- §9.4 — one resolved escalation with a reply on it, so the thread and the
+-- reopen path both have something real to render.
+insert into escalation (id, partner_id, referral_id, order_id, category, subject, description,
+                        status, raised_at, acknowledged_at, resolved_at, resolution_note)
+values ('ee5ca1a7-0000-4000-8000-00000000d001', '0d0d0d0d-0000-4000-8000-000000000001',
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01', 'cccccccc-cccc-4ccc-8ccc-cccccccccc01',
+        'delivery_delay', 'Two boxes short on the bedroom flooring',
+        'Sixteen boxes were on the challan and fourteen arrived. Site is held up on the two bedrooms.',
+        'resolved', now() - interval '18 days', now() - interval '18 days', now() - interval '12 days',
+        'Two boxes dispatched from Whitefield and signed for on site.')
+on conflict (id) do update set status = excluded.status, resolution_note = excluded.resolution_note;
+
+insert into escalation_comment (id, escalation_id, body, internal, author_side, created_at) values
+  ('ee5ca1a7-0000-4000-8000-00000000c001', 'ee5ca1a7-0000-4000-8000-00000000d001',
+   'Checked with the warehouse — two boxes are on the next Whitefield run, Thursday.',
+   false, 'md', now() - interval '16 days'),
+  ('ee5ca1a7-0000-4000-8000-00000000c002', 'ee5ca1a7-0000-4000-8000-00000000d001',
+   'Short-picked at dispatch. Flag this consignment if it recurs.',
+   true, 'md', now() - interval '16 days')
+on conflict (id) do nothing;
 
 -- ----------------------------------------------------------- 11. rewards
--- ₹4,80,500 APPROVED (₹3,84,500 + ₹96,000), so tiers 1 and 2 are earned and the
--- 1 GM gold coin at ₹5 L is ₹19,500 away. The ₹1,42,000 order still waiting on
--- an admin does not count yet — which is the whole point of the gate, and makes
--- the demo show a partner who is one verification from the next milestone.
+-- `reward_tier` / `reward_claim` are the record of coins Material Depot has
+-- physically HANDED OVER. They are not the incentive programme: that is the
+-- monthly and quarterly slab ladder in lib/domain/slabs.ts, computed from these
+-- same orders at read time and never stored. docs/rewards.md has the split.
+--
+-- What the slab programme makes of the orders above, at the go-live date in
+-- lib/domain/programme.ts:
+--   July   ₹2,68,000  slab 3, 3% cashback, Silver Coin — matured, CONFIRMED
+--   August ₹3,84,500  slab 3, 3% cashback, Silver Coin — still maturing, PROVISIONAL
+--   Sept   ₹1,42,000  with an admin, counting towards nothing yet
+--   June   ₹96,000    pre-programme, worth nothing
 --
 -- These rows record only that the tiers were REACHED and where the handover got
 -- to; whether a tier is unlocked is derived from the approved orders every time

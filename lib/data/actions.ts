@@ -512,12 +512,39 @@ export async function deleteFinanceEntry(id: string, projectId: string) {
 
 // --------------------------------------------------------------- referrals
 
+/**
+ * PRD §9.2 — refer a client.
+ *
+ * The form carries more than a name and a number now, and two of the additions
+ * are not cosmetic:
+ *
+ * **Consent.** §14.5 makes the partner's tick a REQUIRED field, because without
+ * it Material Depot has no lawful basis to show that client's store visits and
+ * cart to a third party at all. It is stored as `consent_claimed_at` — the
+ * partner saying the client agreed — and NOT as `consent_given`, which only
+ * Material Depot can set after confirming it with the client directly. A firm
+ * that could set the second one could unlock another person's purchase history
+ * by ticking a box about them.
+ *
+ * **The duplicate pre-check runs before this** (`checkReferralPhone`), not here.
+ * §9.2: "never let a partner submit blind and get rejected later." This function
+ * is still the backstop, because a pre-check is advisory and the unique index is
+ * not.
+ */
 export async function createReferral(input: {
   client_name: string
   md_phone: string
   client_id?: string | null
   project_id?: string | null
   notes?: string | null
+  email?: string | null
+  city?: string | null
+  locality?: string | null
+  project_type?: 'residential' | 'commercial' | 'other' | null
+  budget_band?: string | null
+  timeline?: string | null
+  categories?: string[]
+  consent?: boolean
 }) {
   const pid = await partnerId()
   if (!pid.ok) return pid
@@ -529,20 +556,193 @@ export async function createReferral(input: {
       'A referral needs the client’s exact 10-digit mobile number — that is the only thing that links their store visits and orders back to you.',
     )
   }
+  // Hard-gated, not soft-gated. Everywhere else in Material Depot's apps a
+  // "mandatory" field is soft-gated and logged, because a blocked field stops
+  // real work in a store. This one is different: it is the lawful basis under
+  // the DPDP Act for showing one person's shopping to somebody else, and §14.5
+  // names it as a launch blocker for the journey view.
+  if (input.consent !== true) {
+    return fail(
+      'We need you to confirm the client is happy for Material Depot to contact them and to share what they do with us. Without that we cannot show you their visits or their cart.',
+    )
+  }
 
-  const r = await insert('referral', {
+  const values: Row = {
     partner_id: pid.data,
     client_id: input.client_id || null,
     project_id: input.project_id || null,
     client_name: input.client_name.trim(),
     md_phone: phone,
     notes: input.notes?.trim() || null,
-  }, 'this referral', '/referrals')
+    consent_claimed_at: new Date().toISOString(),
+  }
+  const text = (v: string | null | undefined) => (v === undefined ? undefined : v?.trim() || null)
+  for (const k of ['email', 'city', 'locality', 'budget_band', 'timeline'] as const) {
+    const v = text(input[k])
+    if (v !== undefined) values[k] = v
+  }
+  if (input.project_type) values.project_type = input.project_type
+  if (input.categories?.length) values.categories = input.categories
+
+  const r = await insert('referral', values, 'this referral', '/referrals')
 
   if (!r.ok && /duplicate key|unique/i.test(r.error)) {
     return fail(`You have already referred ${phone}. Open that referral to see where it has got to.`)
   }
+  if (!r.ok && /consent_claimed_at|column .* does not exist/i.test(r.error)) {
+    // 005_studio.sql has not been pasted into this project yet. Say which file,
+    // rather than showing the raw Postgres message — the fix is a paste, and
+    // the person reading this is the person who can do it.
+    return fail(
+      'This Material Depot workspace has not had supabase/migrations/005_studio.sql applied yet, so the referral form cannot save the consent record. Tell your key account manager; nothing you typed has been lost.',
+    )
+  }
   return r
+}
+
+/**
+ * §9.2's real-time duplicate check, run as the partner types the number.
+ *
+ * "If the number is already attributed elsewhere or belongs to an existing
+ * customer, show an inline warning BEFORE submission — never let a partner
+ * submit blind and get rejected later."
+ *
+ * Four outcomes, and the fourth is the one that makes this honest:
+ *
+ * - `free`      — nobody has referred this number.
+ * - `yours`     — you already have. Opens your existing referral.
+ * - `taken`     — another firm holds it. §6.3's first-approved-claim-wins.
+ * - `unknown`   — the check itself failed. Says so, and lets the partner submit
+ *                 anyway, because a check that silently reports "free" when it
+ *                 could not run is worse than no check: it is a promise.
+ *
+ * What it deliberately does NOT do is tell the partner WHO holds the number.
+ * That is another firm's client list.
+ */
+export type PhoneCheck =
+  | { state: 'free' }
+  | { state: 'yours'; referralId: string; clientName: string }
+  | { state: 'taken' }
+  | { state: 'invalid' }
+  | { state: 'unknown'; why: string }
+
+export async function checkReferralPhone(raw: string): Promise<PhoneCheck> {
+  const phone = phone10(raw)
+  if (!phone) return { state: 'invalid' }
+
+  const pid = await partnerId()
+  if (!pid.ok) return { state: 'unknown', why: pid.error }
+
+  const sb = await supabaseServer()
+  // RLS scopes this to the caller's own firm, so a hit here is always "yours".
+  const mine = await sb.from('referral').select('id, client_name').eq('md_phone', phone).maybeSingle()
+  if (mine.error) return { state: 'unknown', why: mine.error.message }
+  if (mine.data) return { state: 'yours', referralId: mine.data.id, clientName: mine.data.client_name }
+
+  // Whether ANOTHER firm holds it cannot be read through RLS — by design, that
+  // is another firm's data. `referral_phone_taken()` (005_studio.sql) answers
+  // yes/no and nothing about who. If 005 has not been pasted into this project
+  // the RPC 404s and this reports `unknown`, so the form says the check could
+  // not run rather than reporting `free`. A check that answers "clear" when it
+  // did not run is worse than no check, because it is a promise.
+  const other = await sb.rpc('referral_phone_taken', { p_phone: phone })
+  if (other.error) return { state: 'unknown', why: other.error.message }
+  return other.data === true ? { state: 'taken' } : { state: 'free' }
+}
+
+/**
+ * §14.5 — revealing a masked phone number, and logging that it happened.
+ *
+ * The log is the reason the mask is a control rather than decoration. It
+ * returns the number only after the write succeeds: a reveal that is shown but
+ * not recorded is exactly the reveal somebody would want.
+ */
+export async function revealPhone(referralId: string, surface: string): Promise<Result<string>> {
+  const pid = await partnerId()
+  if (!pid.ok) return pid
+
+  const sb = await supabaseServer()
+  const { data, error } = await sb.from('referral').select('md_phone').eq('id', referralId).maybeSingle()
+  if (error) return fail(`Could not read that client: ${error.message}`)
+  if (!data) return fail('That client is not on your list.')
+
+  const logged = await sb.from('phone_reveal').insert({
+    partner_id: pid.data,
+    referral_id: referralId,
+    surface,
+  })
+  if (logged.error) return fail(`Could not record the reveal, so the number is not shown: ${logged.error.message}`)
+  return ok(data.md_phone as string)
+}
+
+// ------------------------------------------------------------- escalations
+
+/**
+ * PRD §9.4. Raised against a client or one of their orders, routed to the KAM,
+ * auto-escalated to Admin if unacknowledged in 24h.
+ *
+ * An open one HOLDS that order's maturation (§10.5), which is why the form says
+ * so: a partner who raises a ticket about a delivery and then finds their
+ * cashback delayed, with no warning, reads it as a punishment.
+ */
+export async function raiseEscalation(input: {
+  category: 'delivery_delay' | 'quality_damage' | 'wrong_item' | 'billing_gst' | 'other'
+  subject: string
+  description: string
+  referral_id?: string | null
+  order_id?: string | null
+}) {
+  const pid = await partnerId()
+  if (!pid.ok) return pid
+  if (!input.subject?.trim()) return fail('Give the escalation a one-line subject.')
+  if (!input.description?.trim()) return fail('Tell us what happened — the detail is what the store team acts on.')
+
+  const r = await insert('escalation', {
+    partner_id: pid.data,
+    category: input.category,
+    subject: input.subject.trim(),
+    description: input.description.trim(),
+    referral_id: input.referral_id || null,
+    order_id: input.order_id || null,
+  }, 'this escalation', '/referrals')
+  if (r.ok) revalidatePath('/dashboard')
+  return r
+}
+
+export async function commentOnEscalation(escalationId: string, body: string) {
+  if (!body?.trim()) return fail('Nothing to send.')
+  // `internal: false` and `author_side: 'partner'` are BOTH in the policy's
+  // WITH CHECK, so this cannot become an internal note even if a caller lies.
+  return insert('escalation_comment', {
+    escalation_id: escalationId,
+    body: body.trim(),
+    internal: false,
+    author_side: 'partner',
+  }, 'your reply', '/referrals')
+}
+
+/** §9.4: "On resolution, partner can accept or reopen once." */
+export async function reopenEscalation(id: string, why: string) {
+  if (!why?.trim()) return fail('Tell us why it is not resolved — that is what reopens it.')
+  const sb = await supabaseServer()
+  const { error } = await sb.rpc('reopen_escalation', { p_id: id, p_why: why.trim() })
+  if (error) return fail(`Could not reopen that escalation: ${error.message}`)
+  revalidatePath('/referrals')
+  return ok(true as const)
+}
+
+/** §13.4. Upsert, because a firm that has never opened Settings has no row and
+ *  a missing row reads as "everything on". */
+export async function saveNotificationPrefs(prefs: Record<string, { in_app?: boolean; email?: boolean; whatsapp?: boolean }>) {
+  const pid = await partnerId()
+  if (!pid.ok) return pid
+  const sb = await supabaseServer()
+  const { error } = await sb
+    .from('notification_pref')
+    .upsert({ partner_id: pid.data, prefs, updated_at: new Date().toISOString() }, { onConflict: 'partner_id' })
+  if (error) return fail(`Could not save your notification settings: ${error.message}`)
+  revalidatePath('/settings')
+  return ok(true as const)
 }
 
 export async function deleteReferral(id: string) {
@@ -642,6 +842,22 @@ export async function updateStudioProfile(input: {
   website?: string | null
   instagram?: string | null
   logo_url?: string | null
+  // 005_studio.sql — PRD §13.1's remaining profile fields and §13.3's theme.
+  legal_name?: string | null
+  pan?: string | null
+  registered_address?: string | null
+  office_address?: string | null
+  pincode?: string | null
+  operating_area?: string | null
+  linkedin?: string | null
+  team_size?: string | null
+  budget_range?: string | null
+  established_year?: number | null
+  theme_preset?: string
+  theme_primary?: string | null
+  theme_accent?: string | null
+  theme_base?: 'light' | 'dark'
+  market_signal_opt_in?: boolean
 }) {
   const pid = await partnerId()
   if (!pid.ok) return pid
@@ -656,13 +872,32 @@ export async function updateStudioProfile(input: {
     if (!input.contact_name.trim()) return fail('Your own name cannot be blank.')
     values.contact_name = input.contact_name.trim()
   }
-  for (const k of ['email', 'city', 'gst', 'bio', 'website', 'instagram', 'logo_url'] as const) {
+  for (const k of [
+    'email', 'city', 'gst', 'bio', 'website', 'instagram', 'logo_url',
+    'legal_name', 'pan', 'registered_address', 'office_address', 'operating_area',
+    'linkedin', 'team_size', 'budget_range', 'theme_primary', 'theme_accent',
+  ] as const) {
     const v = text(input[k])
     if (v !== undefined) values[k] = v
   }
+  // §2.5 wants pincode captured NOW so that pincode-based KAM assignment in
+  // Phase 2 is a configuration change rather than a rebuild. A wrong one is
+  // worse than none: it would route the firm to the wrong KAM silently.
+  if (input.pincode !== undefined) {
+    const p = input.pincode?.trim() || null
+    if (p && !/^[1-9][0-9]{5}$/.test(p)) return fail('That is not a six-digit Indian pincode.')
+    values.pincode = p
+  }
+  if (input.established_year !== undefined) values.established_year = input.established_year || null
+  if (input.theme_preset !== undefined) values.theme_preset = input.theme_preset
+  if (input.theme_base !== undefined) values.theme_base = input.theme_base
+  if (input.market_signal_opt_in !== undefined) values.market_signal_opt_in = input.market_signal_opt_in
   if (!Object.keys(values).length) return fail('Nothing to save.')
 
   const r = await update<unknown>('partner', pid.data, values, 'your studio profile', '/portfolio')
-  if (r.ok) revalidatePath('/dashboard')
+  if (r.ok) {
+    revalidatePath('/dashboard')
+    revalidatePath('/settings')
+  }
   return r
 }

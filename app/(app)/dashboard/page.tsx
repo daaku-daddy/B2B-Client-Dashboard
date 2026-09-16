@@ -2,67 +2,149 @@ import Link from 'next/link'
 import { ArrowRight, Plus } from 'lucide-react'
 import { currentSession, myKam } from '@/lib/data/session'
 import {
-  listActivity, listClients, listProjects, listReferralEvents, listReferralOrders, listReferrals,
-  listRewardClaims, listRewardTiers,
+  listActivity, listEscalations, listPortfolio, listProjects, listReferralEvents,
+  listReferralOrders, listReferrals,
 } from '@/lib/data/queries'
-import { attributedSale, pendingSale, rewardStatus } from '@/lib/domain/rewards'
-import { RewardTrack } from '@/components/rewards/RewardTrack'
+import {
+  coinWall, eligible, funnel, monthStanding, type LedgerOrder,
+} from '@/lib/domain/ledger'
+import { dayOf, monthKey, previousRange, resolveRange, todayIST, within, type RangeKey } from '@/lib/domain/periods'
+import { MILESTONE_LABEL, MILESTONE_PHRASE } from '@/lib/domain/slabs'
 import { PageHead } from '@/components/shell/PageHead'
 import { ClientActivity } from '@/components/referrals/ClientActivity'
 import { KamCard } from '@/components/partner/KamCard'
 import { ActivityFeed } from '@/components/partner/ActivityFeed'
-import { Badge, Button, Card, CardHead, Empty, Problem, Stat } from '@/components/ui'
+import { RangePicker } from '@/components/partner/RangePicker'
+import { MetricCard } from '@/components/partner/MetricCard'
+import { RevenueTrend } from '@/components/partner/RevenueTrend'
+import { Funnel } from '@/components/partner/Funnel'
+import { NextBestAction, type Nudge } from '@/components/partner/NextBestAction'
+import { OnboardingChecklist } from '@/components/shell/OnboardingChecklist'
+import { Badge, Button, Card, CardHead, Empty, Problem } from '@/components/ui'
 import { inr, inrShort } from '@/lib/format'
 import { STAGES } from '@/lib/domain/project'
 
 /**
- * The partner's home.
+ * Overview — PRD §8.
  *
- * Built around the one question a designer actually has on day one — *what did
- * the clients I sent you do, and what am I owed for it* — and nothing else. The
- * project workspace appears below it only for firms that have asked for it
- * (`partner.workspace_enabled`); for everyone else this page never mentions
- * boards, quotes or margins, because a landing page that opens with six empty
- * modules reads as homework.
+ * "Answer in five seconds: how much business have I done, what's moving, and who
+ * do I call?"
  *
- * The middle of the page is a list of the clients this firm referred, not a
- * merged stream of every event from all of them. The stream was the first cut
- * and it was the wrong unit: four clients' visits, views and orders interleaved
- * newest-first is a log file, and the question is per person. `ClientActivity`
- * holds the list and the drill-in.
+ * Everything on this page hangs off the date range control (§8.2.1), defaulting
+ * to the current calendar month because that is the period the incentive
+ * programme runs on. The previous cut of this page had no period at all, which
+ * meant every figure was a lifetime total wearing no label — the exact ambiguity
+ * §8.2.2 asks to be removed by putting the range in each card header.
+ *
+ * The middle of the page is still a list of the clients this firm referred
+ * rather than a merged event stream, for the reason recorded in
+ * `docs/referrals.md`: the stream is the shape a log file has, and the question
+ * an architect has is per person.
  */
-export default async function DashboardPage() {
-  const session = await currentSession()
-  const firstName = session.ok && session.data ? session.data.partner.contact_name.split(' ')[0] : 'there'
-  const workspace = session.ok && session.data ? session.data.partner.workspace_enabled : false
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string }>
+}) {
+  const { range: rangeParam } = await searchParams
+  const today = todayIST()
+  const range = resolveRange((rangeParam as RangeKey) ?? 'this_month', today)
+  const before = previousRange(range)
 
-  const [referrals, tiers, claims, kam, activity] = await Promise.all([
-    listReferrals(), listRewardTiers(), listRewardClaims(), myKam(), listActivity(8),
+  const session = await currentSession()
+  const partner = session.ok && session.data ? session.data.partner : null
+  const firstName = partner ? partner.contact_name.split(' ')[0] : 'there'
+  const workspace = partner?.workspace_enabled ?? false
+
+  const [referrals, kam, activity, escalations, portfolio] = await Promise.all([
+    listReferrals(), myKam(), listActivity(8), listEscalations(), listPortfolio(),
   ])
 
   const refIds = referrals.ok ? referrals.data.map((r) => r.id) : []
-  // The whole history, not the newest handful: this page now rolls the events
-  // up PER CLIENT — last seen, which stores, what is in their cart — and the
-  // twelve most recent events across everybody would have left a client whose
-  // cart is a month old looking like they had never been in.
-  const [orders, events, projects, clients] = await Promise.all([
+  const [orders, events, projects] = await Promise.all([
     listReferralOrders(refIds),
+    // The whole history, not the newest handful: this page rolls events up PER
+    // CLIENT, and the twelve most recent events across everybody would leave a
+    // client whose cart is a month old looking like they had never been in.
     listReferralEvents(refIds),
     workspace ? listProjects() : Promise.resolve({ ok: true as const, data: [] }),
-    workspace ? listClients() : Promise.resolve({ ok: true as const, data: [] }),
   ])
 
-  const problems = [referrals, tiers, claims, projects, clients].filter((r) => !r.ok) as { ok: false; error: string }[]
+  const problems = [referrals, projects, portfolio].filter((r) => !r.ok) as { ok: false; error: string }[]
 
-  // Approved only. The pending figure is shown beside it rather than folded in —
-  // a partner who sees a total that quietly excludes their newest order, with no
-  // explanation, assumes the number is wrong.
-  const approved = orders.ok ? attributedSale(orders.data) : 0
-  const waiting = orders.ok ? pendingSale(orders.data) : { count: 0, value: 0 }
-  const status = rewardStatus(approved, tiers.ok ? tiers.data : [], claims.ok ? claims.data : [])
+  // An open escalation holds an order's maturation (§10.5). A FAILED read is not
+  // treated as "nothing open" — see the same note on the Rewards page.
+  const openByOrder = new Map<string, number>()
+  if (escalations.ok) {
+    for (const e of escalations.data) {
+      if (e.order_id && ['open', 'acknowledged', 'in_progress', 'reopened'].includes(e.status)) {
+        openByOrder.set(e.order_id, (openByOrder.get(e.order_id) ?? 0) + 1)
+      }
+    }
+  }
+  const all: LedgerOrder[] = orders.ok
+    ? orders.data.map((o) => ({ ...o, open_escalations: openByOrder.get(o.id) ?? 0 }))
+    : []
+
+  const counting = eligible(all, today)
+  const inRange = counting.filter((o) => within(dayOf(o.ordered_on), range))
+  const inPrevious = counting.filter((o) => within(dayOf(o.ordered_on), before))
+  const revenue = inRange.reduce((s, o) => s + (Number(o.order_value) || 0), 0)
+  const revenueBefore = inPrevious.reduce((s, o) => s + (Number(o.order_value) || 0), 0)
+
+  const referredInRange = referrals.ok ? referrals.data.filter((r) => within(dayOf(r.referred_on), range)) : []
+  const referredBefore = referrals.ok ? referrals.data.filter((r) => within(dayOf(r.referred_on), before)) : []
+  const pending = all.filter((o) => o.approval_status === 'pending' && within(dayOf(o.ordered_on), range))
+
+  const month = monthStanding(all, monthKey(today), today)
+  const wall = coinWall(all, today)
+  const ordersPerMonth = new Map<string, number>()
+  for (const o of counting) {
+    const d = dayOf(o.ordered_on)
+    if (d) ordersPerMonth.set(monthKey(d), (ordersPerMonth.get(monthKey(d)) ?? 0) + 1)
+  }
+
+  // §8.2.4's funnel, on distinct CLIENTS. One client who walked in three times
+  // is one client — see the note in components/partner/Funnel.tsx.
+  const evs = events.ok ? events.data : []
+  const inRangeEvents = evs.filter((e) => within(dayOf(e.occurred_at), range))
+  const visited = new Set(inRangeEvents.filter((e) => e.event_type === 'store_visit').map((e) => e.referral_id))
+  const carted = new Set(inRangeEvents.filter((e) => e.event_type === 'cart_add').map((e) => e.referral_id))
+  const ordered = new Set(inRange.map((o) => o.referral_id))
+  const stages = funnel([
+    { key: 'referred', label: 'Referred', count: referredInRange.length },
+    { key: 'visited', label: 'Visited a store', count: visited.size },
+    { key: 'cart', label: 'Started a cart', count: carted.size },
+    { key: 'ordered', label: 'Placed an order', count: ordered.size },
+  ])
 
   const live = projects.ok ? projects.data.filter((p) => p.status === 'active') : []
-  const byStage = (s: string) => live.filter((p) => p.stage === s).length
+  const nudges = nudgesFor({ month, referrals: referrals.ok ? referrals.data : [], events: evs, orders: all, portfolio: portfolio.ok ? portfolio.data : [], today })
+
+  // §8.2.8 — a newly provisioned firm gets the checklist instead of zeroed cards.
+  const isNew = referrals.ok && referrals.data.length === 0 && all.length === 0
+  const steps = [
+    {
+      label: 'Complete your studio profile',
+      done: Boolean(partner?.bio && partner?.city),
+      href: '/settings',
+      why: 'Your logo, city and a line about the practice — it is what appears beside your work on our site.',
+    },
+    {
+      label: 'Refer your first client',
+      done: (referrals.ok ? referrals.data.length : 0) > 0,
+      href: '/referrals?new=1',
+      why: 'Their store visits, cart and orders then show up against their name here.',
+    },
+    {
+      label: workspace ? 'Create your first project' : 'Put a project in your portfolio',
+      done: workspace ? live.length > 0 : (portfolio.ok ? portfolio.data.length : 0) > 0,
+      href: workspace ? '/projects?new=1' : '/portfolio',
+      why: workspace
+        ? 'Rooms, boards and the quote all hang off a project.'
+        : 'Published work gets a page on materialdepot.com with your firm’s card on it.',
+    },
+  ]
 
   return (
     <>
@@ -74,7 +156,11 @@ export default async function DashboardPage() {
             <Link href="/projects?new=1">
               <Button variant="primary"><Plus size={15} /> New project</Button>
             </Link>
-          ) : null
+          ) : (
+            <Link href="/referrals?new=1">
+              <Button variant="primary"><Plus size={15} /> Refer a client</Button>
+            </Link>
+          )
         }
       />
 
@@ -83,84 +169,102 @@ export default async function DashboardPage() {
           <Problem title="Some of this page could not load" detail={problems.map((p) => p.error).join(' · ')} />
         ) : null}
 
+        <RangePicker range={range} />
+
+        {isNew ? (
+          <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
+            <OnboardingChecklist steps={steps} />
+            <KamCard kam={kam.ok ? kam.data : null} error={kam.ok ? null : kam.error} />
+          </div>
+        ) : null}
+
+        <NextBestAction nudges={nudges} />
+
+        {/* §8.2.2's metric cards. Every one has the range on it and goes
+            somewhere — a number a partner cannot drill into is a number they
+            have to ring somebody about. */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat
-            label="Clients you sent us"
-            value={referrals.ok ? referrals.data.length : '—'}
-            hint={`${orders.ok ? orders.data.length : 0} order${orders.ok && orders.data.length === 1 ? '' : 's'} between them`}
-          />
-          <Stat
-            label="Business sent our way"
-            value={inrShort(approved)}
-            hint="Verified and counting"
+          <MetricCard
+            label="Revenue contributed"
+            range={range.label}
+            value={inrShort(revenue)}
+            delta={{ now: revenue, before: revenueBefore, format: inrShort }}
+            hint={`${inRange.length} verified order${inRange.length === 1 ? '' : 's'}`}
+            href="/rewards?tab=ledger"
             tone="good"
           />
-          <Stat
-            label="Being checked"
-            value={waiting.count ? inrShort(waiting.value) : '—'}
+          <MetricCard
+            label="Clients referred"
+            range={range.label}
+            value={referredInRange.length}
+            delta={{ now: referredInRange.length, before: referredBefore.length }}
+            hint={`${referrals.ok ? referrals.data.length : 0} in total`}
+            href="/referrals"
+          />
+          <MetricCard
+            label="This month’s slab"
+            range={month.period.label}
+            value={month.slab ? month.slab.bandLabel.split('–')[0].trim() + '+' : month.belowEntry ? 'Not reached' : '—'}
             hint={
-              waiting.count
-                ? `${waiting.count} order${waiting.count === 1 ? '' : 's'} we are confirming`
+              month.aboveLadder
+                ? 'Above the published ladder — rate being confirmed'
+                : month.gap > 0 && month.next
+                  ? `${inrShort(month.gap)} more for ${month.next.milestone ? MILESTONE_LABEL[month.next.milestone] : 'the next slab'}`
+                  : month.slab
+                    ? 'Top of the ladder'
+                    : `${inrShort(50001 - month.spend)} to start earning`
+            }
+            href="/rewards"
+            tone="brand"
+          />
+          <MetricCard
+            label="Waiting on us"
+            range={range.label}
+            value={pending.length ? inrShort(pending.reduce((s, o) => s + Number(o.order_value || 0), 0)) : '—'}
+            hint={
+              pending.length
+                ? `${pending.length} order${pending.length === 1 ? '' : 's'} we are still verifying`
                 : 'Nothing waiting on us'
             }
-            tone={waiting.count ? 'brand' : undefined}
-          />
-          <Stat
-            label="Next reward needs"
-            value={status.next ? inr(status.next.remaining) : status.complete ? 'All earned' : '—'}
-            hint={
-              status.next
-                ? status.next.tier.label
-                : status.complete
-                  ? 'Every milestone unlocked'
-                  : 'We could not load the ladder'
-            }
+            href="/rewards?tab=ledger"
+            tone={pending.length ? 'warn' : undefined}
           />
         </div>
 
         <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
-          <ClientActivity
-            referrals={referrals.ok ? referrals.data : []}
-            events={events.ok ? events.data : []}
-            orders={orders.ok ? orders.data : []}
-            eventsError={events.ok ? null : events.error}
-            ordersError={orders.ok ? null : orders.error}
-            hint="Tap a name for their visits, their cart and their orders"
-            linkBase="/referrals?client="
-            action={
-              <Link href="/referrals" className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline">
-                All clients <ArrowRight size={12} />
-              </Link>
-            }
-            emptyBody="Tell us about a client and everything they do with us — store visits, what they looked at, what is in their cart, what they ordered — shows up against their name here."
-            emptyAction={
-              <Link href="/referrals" className="text-sm font-medium text-brand hover:underline">
-                Refer your first client →
-              </Link>
-            }
-          />
+          <div className="space-y-5">
+            <RevenueTrend months={wall} orderCounts={ordersPerMonth} />
+            <ClientActivity
+              referrals={referrals.ok ? referrals.data : []}
+              events={evs}
+              orders={all}
+              eventsError={events.ok ? null : events.error}
+              ordersError={orders.ok ? null : orders.error}
+              hint="Tap a name for their visits, their cart and their orders"
+              linkBase="/referrals?client="
+              action={
+                <Link href="/referrals" className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline">
+                  All clients <ArrowRight size={12} />
+                </Link>
+              }
+              emptyBody="Tell us about a client and everything they do with us — store visits, what they looked at, what is in their cart, what they ordered — shows up against their name here."
+              emptyAction={
+                <Link href="/referrals?new=1" className="text-sm font-medium text-brand hover:underline">
+                  Refer your first client →
+                </Link>
+              }
+            />
+          </div>
 
           <div className="space-y-5">
-            <KamCard kam={kam.ok ? kam.data : null} error={kam.ok ? null : kam.error} />
+            {isNew ? null : <KamCard kam={kam.ok ? kam.data : null} error={kam.ok ? null : kam.error} />}
+            <Funnel stages={stages} range={range.label} />
             <Card>
               <CardHead title="Your account with us" hint="What we have done, and when" />
               <ActivityFeed items={activity.ok ? activity.data : []} error={activity.ok ? null : activity.error} />
             </Card>
           </div>
         </div>
-
-        <Card className="border-0 bg-transparent">
-          <div className="mb-3 flex items-end justify-between">
-            <div>
-              <h2 className="font-display text-[15px] font-semibold tracking-tight text-ink">Your rewards ladder</h2>
-              <p className="text-xs text-ink-faint">Cumulative, across every client you have sent us</p>
-            </div>
-            <Link href="/rewards" className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline">
-              Details <ArrowRight size={12} />
-            </Link>
-          </div>
-          <RewardTrack status={status} compact />
-        </Card>
 
         {workspace ? (
           <Card>
@@ -204,11 +308,6 @@ export default async function DashboardPage() {
                 })}
               </ul>
             )}
-            <p className="border-t border-line px-4 py-2 text-[11px] text-ink-faint">
-              {live.length
-                ? `${byStage('design')} in design · ${byStage('procurement')} procuring · ${byStage('execution')} on site`
-                : null}
-            </p>
           </Card>
         ) : (
           <Card>
@@ -228,4 +327,75 @@ export default async function DashboardPage() {
       </div>
     </>
   )
+}
+
+/**
+ * §8.2.7's rules. Kept here, next to the data, rather than in a service — each
+ * one is two lines and they are only worth anything while they stay readable
+ * beside the figures they are computed from.
+ */
+function nudgesFor({
+  month, referrals, events, orders, portfolio, today,
+}: {
+  month: ReturnType<typeof monthStanding>
+  referrals: { id: string; client_name: string; referred_on: string }[]
+  events: { referral_id: string; occurred_at: string; event_type: string }[]
+  orders: LedgerOrder[]
+  portfolio: { status: string }[]
+  today: string
+}): Nudge[] {
+  const out: Nudge[] = []
+
+  // The money one goes first, always: it is the only nudge that is worth
+  // something to the partner rather than to us.
+  if (month.next && month.gap > 0 && !month.belowEntry) {
+    out.push({
+      id: 'slab',
+      text: `${inr(month.gap)} more this month reaches ${month.next.cashbackPct}% cashback${month.next.milestone ? ` and ${MILESTONE_PHRASE[month.next.milestone]}` : ''}.`,
+      href: '/rewards',
+      cta: 'See the ladder',
+    })
+  } else if (month.belowEntry && month.spend > 0) {
+    out.push({
+      id: 'entry',
+      text: `${inr(50001 - month.spend)} more this month starts earning cashback.`,
+      href: '/rewards',
+      cta: 'How it works',
+    })
+  }
+
+  // Clients who have gone quiet. §8.2.7's own example.
+  const lastSeen = new Map<string, string>()
+  for (const e of events) {
+    const d = dayOf(e.occurred_at)
+    if (!d) continue
+    const prev = lastSeen.get(e.referral_id)
+    if (!prev || d > prev) lastSeen.set(e.referral_id, d)
+  }
+  const ordered = new Set(orders.map((o) => o.referral_id))
+  const cutoff = new Date(Date.parse(today) - 30 * 86_400_000).toISOString().slice(0, 10)
+  const quiet = referrals.filter((r) => !ordered.has(r.id) && (lastSeen.get(r.id) ?? r.referred_on) < cutoff)
+  if (quiet.length) {
+    out.push({
+      id: 'quiet',
+      text:
+        quiet.length === 1
+          ? `${quiet[0].client_name} has not been near a store in 30 days and has not ordered.`
+          : `${quiet.length} referred clients have not been near a store in 30 days.`,
+      href: '/referrals',
+      cta: 'See who',
+    })
+  }
+
+  const needsWork = portfolio.filter((p) => p.status === 'rejected').length
+  if (needsWork) {
+    out.push({
+      id: 'portfolio',
+      text: `${needsWork} portfolio project${needsWork === 1 ? '' : 's'} need${needsWork === 1 ? 's' : ''} changes before we can publish ${needsWork === 1 ? 'it' : 'them'}.`,
+      href: '/portfolio',
+      cta: 'Open portfolio',
+    })
+  }
+
+  return out
 }

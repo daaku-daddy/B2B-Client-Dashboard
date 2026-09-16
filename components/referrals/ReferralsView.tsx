@@ -2,17 +2,26 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2, UserPlus } from 'lucide-react'
-import type { Client, Referral, ReferralEvent, ReferralOrder } from '@/lib/domain/types'
+import { ArrowLeft, Lock, Plus, Search, Trash2, UserPlus } from 'lucide-react'
+import type {
+  Client, Escalation, EscalationComment, Referral, ReferralEvent,
+} from '@/lib/domain/types'
 import {
-  Button, Card, CardHead, Empty, Field, Input, Problem, Select, Table, Td, Textarea, Th,
+  Badge, Button, Card, CardHead, Empty, Input, Problem, Select, Table, Td, Th,
 } from '@/components/ui'
 import { Modal } from '@/components/ui/Modal'
 import { ReferralFeed } from './ReferralFeed'
 import { CartPanel } from './CartPanel'
-import { OrderApprovalBadge } from './OrderApproval'
+import { ReferClientForm } from './ReferClientForm'
+import { MaskedPhone } from './MaskedPhone'
+import { ClientOrders, OrdersFooter } from './ClientOrders'
+import { Escalations } from './Escalations'
 import { summariseClients } from '@/lib/domain/referrals'
-import { createReferral, deleteReferral } from '@/lib/data/actions'
+import { CONSENT_COPY, consentOf, itemisedVisible, valueBand } from '@/lib/domain/privacy'
+import { standing, type LedgerOrder } from '@/lib/domain/ledger'
+import { GO_LIVE } from '@/lib/domain/programme'
+import { deleteReferral } from '@/lib/data/actions'
+import { EV, track } from '@/lib/analytics/track'
 import { date, inr, inrShort, relative } from '@/lib/format'
 
 /**
@@ -25,22 +34,32 @@ import { date, inr, inrShort, relative } from '@/lib/format'
  * credited, and it would sit there looking fine.
  */
 export function ReferralsView({
-  referrals, clients, events, orders, eventsError, initialOpenId,
+  referrals, clients, events, orders, eventsError, initialOpenId, openNew,
+  escalations, escalationComments, escalationsError, today,
 }: {
   referrals: Referral[]
   clients: Client[]
   events: ReferralEvent[]
-  orders: ReferralOrder[]
+  orders: LedgerOrder[]
   eventsError?: string | null
   /** `?client=<referral id>`, so the dashboard can link straight to one. */
   initialOpenId?: string | null
+  /** `?new=1`, so a call to action anywhere can open the form. */
+  openNew?: boolean
+  escalations: Escalation[]
+  escalationComments: EscalationComment[]
+  escalationsError?: string | null
+  today: string
 }) {
   const router = useRouter()
-  const [adding, setAdding] = useState(false)
+  const [adding, setAdding] = useState(Boolean(openNew))
   const [openId, setOpenId] = useState<string | null>(initialOpenId ?? null)
   const [error, setError] = useState<string | null>(null)
   const [pending, start] = useTransition()
-  const [fromClient, setFromClient] = useState('')
+  // §9.1's filters, search and sort.
+  const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [sort, setSort] = useState<'last_activity' | 'value' | 'referred'>('last_activity')
 
   const names = useMemo(() => new Map(referrals.map((r) => [r.id, r.client_name])), [referrals])
 
@@ -71,24 +90,29 @@ export function ReferralsView({
     window.history.replaceState(null, '', url.toString())
   }
 
-  const open = referrals.find((r) => r.id === openId) ?? null
 
-  function submit(form: FormData) {
-    setError(null)
-    start(async () => {
-      const picked = clients.find((c) => c.id === fromClient)
-      const res = await createReferral({
-        client_id: picked?.id ?? null,
-        client_name: picked?.name ?? String(form.get('client_name') ?? ''),
-        md_phone: picked?.phone ?? String(form.get('md_phone') ?? ''),
-        notes: String(form.get('notes') ?? ''),
-      })
-      if (!res.ok) return setError(res.error)
-      setAdding(false)
-      setFromClient('')
-      router.refresh()
+  // §9.1 — search by name or phone, filter by status, sort. Searching the phone
+  // works on the FULL number even though the list shows a masked one: an
+  // architect typing a number they already have is not a privacy event, and
+  // making them reveal first to find someone would be security theatre.
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    let out = referrals.filter((r) => {
+      if (statusFilter && (r.status ?? 'submitted') !== statusFilter) return false
+      if (!q) return true
+      return r.client_name.toLowerCase().includes(q) || r.md_phone.includes(q.replace(/\D/g, ''))
     })
-  }
+    out = [...out].sort((a, b) => {
+      if (sort === 'value') return (stats.get(b.id)?.approved ?? 0) - (stats.get(a.id)?.approved ?? 0)
+      if (sort === 'referred') return b.referred_on.localeCompare(a.referred_on)
+      const la = stats.get(a.id)?.lastSeen ?? a.referred_on
+      const lb = stats.get(b.id)?.lastSeen ?? b.referred_on
+      return String(lb).localeCompare(String(la))
+    })
+    return out
+  }, [referrals, query, statusFilter, sort, stats])
+
+  const open = referrals.find((r) => r.id === openId) ?? null
 
   function remove(id: string) {
     setError(null)
@@ -103,84 +127,136 @@ export function ReferralsView({
   if (open) {
     const s = stats.get(open.id)
     const mine = s?.events ?? []
-    const myOrders = s?.orders ?? []
+    const myOrders = (s?.orders ?? []) as LedgerOrder[]
+    const consent = consentOf(open)
+    const itemised = itemisedVisible(consent)
+    const myEscalations = escalations.filter((e) => e.referral_id === open.id)
+    const counted = myOrders.filter((o) => standing(o, today, GO_LIVE).state === 'counted')
+    const countedValue = counted.reduce((sum, o) => sum + (Number(o.order_value) || 0), 0)
+
     return (
       <>
         <button
           onClick={() => openClient(null)}
           className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-ink-soft transition hover:text-brand"
         >
-          <ArrowLeft size={14} /> All referrals
+          <ArrowLeft size={14} /> All clients
         </button>
 
-        <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
-          <Card>
-            <CardHead
-              title={open.client_name}
-              hint={`${open.md_phone} · referred ${date(open.referred_on)}`}
-              action={
-                <button
-                  onClick={() => remove(open.id)}
-                  disabled={pending}
-                  className="rounded-md p-1.5 text-ink-faint transition hover:bg-bad-soft hover:text-bad"
-                  title="Remove this referral"
-                >
-                  <Trash2 size={14} />
-                </button>
-              }
-            />
-            <ReferralFeed
-              events={mine}
-              names={names}
-              error={eventsError}
-              emptyBody="Nothing has come through for them yet. Store visits, the products they looked at, their cart and any order will appear here."
-            />
-          </Card>
+        {/* §14.5 — without confirmed consent a partner sees aggregate facts
+            only: visited yes/no, ordered yes/no, a value BAND. The banner says
+            which state this client is in rather than the page quietly showing
+            less than it did for the client above. */}
+        {!itemised ? (
+          <div className="mb-4 flex items-start gap-2.5 rounded-[var(--radius-card)] border border-line bg-raised px-4 py-3">
+            <Lock size={15} className="mt-0.5 shrink-0 text-ink-faint" />
+            <p className="text-xs leading-relaxed text-ink-soft">
+              <strong className="text-ink">{CONSENT_COPY[consent].label}.</strong> {CONSENT_COPY[consent].detail}
+            </p>
+          </div>
+        ) : null}
 
-          <div className="space-y-4">
+        <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
+          <div className="space-y-5">
             <Card>
               <CardHead
-                title="In their cart"
-                hint="The last cart we saw at a Material Depot store"
+                title={open.client_name}
+                hint={
+                  <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <MaskedPhone referralId={open.id} phone={open.md_phone} surface="client_detail" />
+                    <span>· referred {date(open.referred_on)}</span>
+                    {open.city || open.locality ? <span>· {[open.locality, open.city].filter(Boolean).join(', ')}</span> : null}
+                    {open.attribution_expires_on ? (
+                      <span>· credited to you until {date(open.attribution_expires_on)}</span>
+                    ) : null}
+                  </span>
+                }
+                action={
+                  <button
+                    onClick={() => remove(open.id)}
+                    disabled={pending}
+                    className="rounded-md p-1.5 text-ink-faint transition hover:bg-bad-soft hover:text-bad"
+                    title="Remove this referral"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                }
               />
-              <CartPanel cart={s?.cart ?? { state: 'none' }} />
+              {itemised ? (
+                <ReferralFeed
+                  events={mine}
+                  names={names}
+                  error={eventsError}
+                  emptyBody="Nothing has come through for them yet. Store visits, the products they looked at, their cart and any order will appear here."
+                />
+              ) : (
+                <AggregateOnly
+                  visited={mine.some((e) => e.event_type === 'store_visit')}
+                  orders={myOrders.length}
+                  band={valueBand(countedValue)}
+                />
+              )}
             </Card>
 
             <Card>
-              <CardHead title="What they have bought" hint="Counts towards your rewards" />
-              {myOrders.length === 0 ? (
-                <Empty title="No orders yet" body="Their orders will show here as they are placed." />
+              <CardHead
+                title="What they have bought"
+                hint="Every order, and what each one is doing for your rewards"
+              />
+              {itemised ? (
+                <>
+                  <ClientOrders orders={myOrders} today={today} />
+                  <OrdersFooter orders={myOrders} today={today} goLive={GO_LIVE} />
+                </>
               ) : (
-                <Table className="min-w-0">
-                  <thead>
-                    <tr><Th>Order</Th><Th>Placed</Th><Th /><Th className="text-right">Value</Th></tr>
-                  </thead>
-                  <tbody>
-                    {myOrders.map((o) => (
-                      <tr key={o.id}>
-                        {/* The enquiry id gets the room its real length needs. A
-                            truncated ENQ… is not a shortened number, it is a
-                            different one to anyone reading it off the screen. */}
-                        <Td className="font-mono text-[11px]" title={o.md_enq_id}>{o.md_enq_id}</Td>
-                        <Td className="text-xs text-ink-soft">{date(o.ordered_on)}</Td>
-                        <Td><OrderApprovalBadge status={o.approval_status} /></Td>
-                        <Td className="tnum text-right text-xs font-medium">{inr(o.order_value)}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
+                <p className="px-4 py-4 text-sm text-ink-soft">
+                  {myOrders.length
+                    ? `${myOrders.length} order${myOrders.length === 1 ? '' : 's'} so far, ${countedValue ? `${valueBand(countedValue).toLowerCase()} of it counting towards your rewards` : 'none of it counting towards your rewards yet'}. We can show you the detail once this client confirms they are happy for us to.`
+                    : 'No orders yet.'}
+                </p>
               )}
               <div className="flex items-center justify-between border-t border-line px-4 py-2.5">
                 <span className="text-xs font-medium text-ink-soft">Counting towards your rewards</span>
-                <span className="tnum text-sm font-semibold text-good">{inr(s?.approved ?? 0)}</span>
+                <span className="tnum text-sm font-semibold text-good">
+                  {itemised ? inr(countedValue) : valueBand(countedValue)}
+                </span>
               </div>
-              {s?.pendingCount ? (
-                <p className="border-t border-line px-4 py-2 text-[11px] text-ink-faint">
-                  {inr(s.pending)} across {s.pendingCount} order{s.pendingCount === 1 ? '' : 's'} is still
-                  being checked by us, and is not in that figure yet.
-                </p>
-              ) : null}
             </Card>
+
+            <Escalations
+              escalations={myEscalations}
+              comments={escalationComments}
+              orders={myOrders}
+              referralId={open.id}
+              error={escalationsError}
+            />
+          </div>
+
+          <div className="space-y-4">
+            <Card>
+              <CardHead title="In their cart" hint="The last cart we saw at a Material Depot store" />
+              {itemised ? (
+                <CartPanel cart={s?.cart ?? { state: 'none' }} />
+              ) : (
+                <p className="px-4 py-4 text-sm text-ink-soft">
+                  {s?.cart.state === 'open'
+                    ? 'They have something in a cart. We can show you what once they confirm they are happy for us to.'
+                    : 'Nothing in a cart that we can tell you about.'}
+                </p>
+              )}
+            </Card>
+
+            {open.project_type || open.budget_band || open.timeline || open.categories?.length ? (
+              <Card>
+                <CardHead title="What you told us" hint="From the referral form" />
+                <dl className="space-y-1.5 px-4 py-3 text-sm">
+                  {open.project_type ? <Detail label="Project" value={open.project_type} /> : null}
+                  {open.budget_band ? <Detail label="Budget" value={open.budget_band} /> : null}
+                  {open.timeline ? <Detail label="Timeline" value={open.timeline} /> : null}
+                  {open.categories?.length ? <Detail label="Looking for" value={open.categories.join(', ')} /> : null}
+                </dl>
+              </Card>
+            ) : null}
 
             {open.notes ? (
               <Card>
@@ -193,6 +269,7 @@ export function ReferralsView({
       </>
     )
   }
+
 
   return (
     <>
@@ -213,107 +290,174 @@ export function ReferralsView({
             action={<Button variant="primary" onClick={() => setAdding(true)}><Plus size={15} /> Refer your first client</Button>}
           />
         ) : (
-          <Table>
-            <thead>
-              <tr>
-                <Th>Client</Th>
-                <Th>Phone</Th>
-                <Th>Referred</Th>
-                <Th>Last seen</Th>
-                <Th className="text-right">In cart</Th>
-                <Th className="text-right">Orders</Th>
-                <Th className="text-right">Value</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {referrals.map((r) => {
-                const s = stats.get(r.id)
-                return (
-                  <tr
-                    key={r.id}
-                    onClick={() => openClient(r.id)}
-                    className="cursor-pointer transition hover:bg-raised"
-                  >
-                    <Td className="font-medium">{r.client_name}</Td>
-                    <Td className="tnum text-xs text-ink-soft">{r.md_phone}</Td>
-                    <Td className="text-xs text-ink-soft">{date(r.referred_on)}</Td>
-                    <Td className="text-xs text-ink-soft">{s?.lastSeen ? relative(s.lastSeen) : '—'}</Td>
-                    <Td className="tnum text-right text-xs">
-                      {s?.cart.state === 'open' ? (
-                        <span className="font-semibold text-brand">
-                          {s.cart.cart.value !== null ? inrShort(s.cart.cart.value) : 'open'}
-                        </span>
-                      ) : (
-                        <span className="text-ink-faint">—</span>
-                      )}
-                    </Td>
-                    <Td className="tnum text-right text-xs">{s?.orders.length ?? 0}</Td>
-                    <Td className="tnum text-right text-xs font-semibold">
-                      {s?.approved ? <span className="text-good">{inrShort(s.approved)}</span> : <span className="text-ink-faint">—</span>}
-                    </Td>
+          <>
+            <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
+              <div className="relative min-w-[180px] flex-1">
+                <Search size={13} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-ink-faint" />
+                <Input
+                  value={query}
+                  onChange={(e) => {
+                    setQuery(e.target.value)
+                    if (e.target.value.length === 3) track(EV.client_filter_applied, { kind: 'search' })
+                  }}
+                  placeholder="Search name or number"
+                  className="h-8 pl-7 text-xs"
+                />
+              </div>
+              <Select
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value)
+                  track(EV.client_filter_applied, { kind: 'status', value: e.target.value || 'all' })
+                }}
+                className="h-8 w-auto text-xs"
+              >
+                <option value="">Any status</option>
+                <option value="submitted">Waiting on us</option>
+                <option value="approved">Approved</option>
+                <option value="active">Active</option>
+                <option value="rejected">Not accepted</option>
+              </Select>
+              <Select
+                value={sort}
+                onChange={(e) => setSort(e.target.value as typeof sort)}
+                className="h-8 w-auto text-xs"
+              >
+                <option value="last_activity">Last activity</option>
+                <option value="value">Order value</option>
+                <option value="referred">Recently referred</option>
+              </Select>
+              {rows.length !== referrals.length ? (
+                <span className="text-xs text-ink-faint">{rows.length} of {referrals.length}</span>
+              ) : null}
+            </div>
+
+            {rows.length === 0 ? (
+              <Empty title="Nothing matches" body="Try a different search, or clear the status filter." />
+            ) : (
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Client</Th>
+                    <Th>Phone</Th>
+                    <Th>Status</Th>
+                    <Th>Referred</Th>
+                    <Th>Last seen</Th>
+                    <Th className="text-right">In cart</Th>
+                    <Th className="text-right">Orders</Th>
+                    <Th className="text-right">Counting</Th>
                   </tr>
-                )
-              })}
-            </tbody>
-          </Table>
+                </thead>
+                <tbody>
+                  {rows.map((r) => {
+                    const st = stats.get(r.id)
+                    const itemised = itemisedVisible(consentOf(r))
+                    const counted = (st?.orders ?? []).filter(
+                      (o) => standing(o as LedgerOrder, today, GO_LIVE).state === 'counted',
+                    )
+                    const countedValue = counted.reduce((sum, o) => sum + (Number(o.order_value) || 0), 0)
+                    return (
+                      <tr
+                        key={r.id}
+                        onClick={() => {
+                          openClient(r.id)
+                          track(EV.client_detail_viewed)
+                        }}
+                        className="cursor-pointer transition hover:bg-raised"
+                      >
+                        <Td className="font-medium">{r.client_name}</Td>
+                        <Td className="text-xs" onClick={(e) => e.stopPropagation()}>
+                          <MaskedPhone referralId={r.id} phone={r.md_phone} surface="client_list" />
+                        </Td>
+                        <Td><ReferralStatusChip status={r.status} reason={r.rejection_reason} /></Td>
+                        <Td className="text-xs text-ink-soft">{date(r.referred_on)}</Td>
+                        <Td className="text-xs text-ink-soft">{st?.lastSeen ? relative(st.lastSeen) : '—'}</Td>
+                        <Td className="tnum text-right text-xs">
+                          {st?.cart.state === 'open' ? (
+                            <span className="font-semibold text-brand">
+                              {itemised && st.cart.cart.value !== null ? inrShort(st.cart.cart.value) : 'open'}
+                            </span>
+                          ) : (
+                            <span className="text-ink-faint">—</span>
+                          )}
+                        </Td>
+                        <Td className="tnum text-right text-xs">{st?.orders.length ?? 0}</Td>
+                        <Td className="tnum text-right text-xs font-semibold">
+                          {countedValue ? (
+                            <span className="text-good">{itemised ? inrShort(countedValue) : valueBand(countedValue)}</span>
+                          ) : (
+                            <span className="text-ink-faint">—</span>
+                          )}
+                        </Td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </Table>
+            )}
+          </>
         )}
       </Card>
 
       <Modal
         open={adding}
-        onClose={() => { setAdding(false); setFromClient('') }}
+        onClose={() => setAdding(false)}
         title="Refer a client"
         hint="Their exact mobile number is what links their visits and orders back to you."
       >
-        {error ? <div className="mb-3"><Problem title="Could not save" detail={error} /></div> : null}
-        <form action={submit} className="space-y-3">
-          {clients.length ? (
-            <Field label="One of your clients" hint="Or leave this blank and type someone else in below.">
-              <Select value={fromClient} onChange={(e) => setFromClient(e.target.value)}>
-                <option value="">Someone not on my client list</option>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id} disabled={!c.phone}>
-                    {c.name}{c.phone ? ` — ${c.phone}` : ' — no phone on file'}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          ) : null}
-
-          {!fromClient ? (
-            <>
-              <Field label="Client name" required><Input name="client_name" /></Field>
-              <Field
-                label="Their mobile number"
-                required
-                hint="10 digits. It has to be the number they will give us in store — we match on it exactly."
-              >
-                <Input name="md_phone" inputMode="numeric" placeholder="9876543210" />
-              </Field>
-            </>
-          ) : (
-            <div className="rounded-lg border border-line bg-raised px-3 py-2 text-xs text-ink-soft">
-              Referring <strong className="text-ink">{clients.find((c) => c.id === fromClient)?.name}</strong> on{' '}
-              <span className="tnum">{clients.find((c) => c.id === fromClient)?.phone}</span>.
-              {!clients.find((c) => c.id === fromClient)?.phone ? (
-                <span className="mt-1 block text-bad">
-                  This client has no phone number on file. Add one on their client record first — without it nothing
-                  can be credited to you.
-                </span>
-              ) : null}
-            </div>
-          )}
-
-          <Field label="Note" hint="What they are looking for, which project it is against.">
-            <Textarea name="notes" rows={2} />
-          </Field>
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" onClick={() => { setAdding(false); setFromClient('') }}>Cancel</Button>
-            <Button type="submit" variant="primary" disabled={pending}>{pending ? 'Saving…' : 'Refer them'}</Button>
-          </div>
-        </form>
+        <ReferClientForm clients={clients} onDone={() => setAdding(false)} onCancel={() => setAdding(false)} />
       </Modal>
     </>
+  )
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-xs text-ink-faint">{label}</dt>
+      <dd className="text-right text-ink">{value}</dd>
+    </div>
+  )
+}
+
+/**
+ * §6.4's referral status machine, as a chip.
+ *
+ * `submitted` is the common state and it is labelled "Waiting on us", not
+ * "Pending" — a partner reading "pending" assumes they have something left to
+ * do. They do not; we do, within 48 hours.
+ */
+function ReferralStatusChip({ status, reason }: { status?: string; reason?: string | null }) {
+  const s = status ?? 'submitted'
+  const map: Record<string, { label: string; tone: 'neutral' | 'good' | 'warn' | 'info' | 'bad' }> = {
+    submitted: { label: 'Waiting on us', tone: 'info' },
+    under_review: { label: 'Being checked', tone: 'info' },
+    approved: { label: 'Approved', tone: 'good' },
+    active: { label: 'Active', tone: 'good' },
+    rejected: { label: 'Not accepted', tone: 'bad' },
+    duplicate: { label: 'Already referred', tone: 'warn' },
+    dormant: { label: 'Gone quiet', tone: 'neutral' },
+    expired: { label: 'Expired', tone: 'neutral' },
+  }
+  const m = map[s] ?? { label: s, tone: 'neutral' as const }
+  return <span title={reason ?? undefined}><Badge tone={m.tone}>{m.label}</Badge></span>
+}
+
+/**
+ * §14.5's "no consent → limited view": visited yes/no, ordered yes/no, an order
+ * value band. No itemised carts, no timeline.
+ *
+ * Rendered as three plain facts rather than as a greyed-out version of the real
+ * timeline. A blurred screen invites a partner to try to read through it; three
+ * sentences make it clear that the detail is not being withheld from them
+ * personally, it has not been agreed to yet.
+ */
+function AggregateOnly({ visited, orders, band }: { visited: boolean; orders: number; band: string }) {
+  return (
+    <dl className="space-y-2 px-4 py-4 text-sm">
+      <Detail label="Been into a store" value={visited ? 'Yes' : 'Not yet'} />
+      <Detail label="Placed an order" value={orders ? `Yes · ${orders}` : 'Not yet'} />
+      <Detail label="Counting towards your rewards" value={band} />
+    </dl>
   )
 }

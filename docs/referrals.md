@@ -1,6 +1,7 @@
 # Referrals
 
-**Covers:** `components/referrals/** · app/api/sync/referrals/route.ts · referral · referral_event · referral_order`
+**Covers:** `components/referrals/** · app/api/sync/referrals/route.ts · referral ·
+referral_event · referral_order · lib/domain/privacy.ts · lib/domain/reasons.ts`
 
 ## The screen: one row per client, the log behind the name
 
@@ -103,12 +104,27 @@ using the service-role key to write tables partners can only read.
     "phone": "9876543210",
     "md_enq_id": "ENQ2026090912345",  // unique; makes the total idempotent
     "order_value": 184500,
-    "ordered_on": "2026-09-09",
+    "ordered_on": "2026-09-09",       // decides the slab PERIOD
     "store": "Whitefield",
-    "status": "Order Placed"
+    "status": "Order Placed",
+
+    // 005_studio.sql. Everything below is what the incentive programme needs
+    // and cannot compute without — PRD §10.4 calls the coupon pair a hard
+    // Phase 1 dependency, not a Phase 2 nicety.
+    "delivered_on": "2026-09-20",     // the 30-day maturation counts from HERE
+    "coupon_code": "MDPRO2",
+    "discount_availed": 3690          // rupees ACTUALLY taken off at the till
   }]
 }
 ```
+
+**Omit `discount_availed` rather than sending 0.** An absent key means "we do not
+know" and the dashboard withholds the net cashback figure and says why; a literal
+`0` is a claim that the client took no discount, and sending it wrongly
+overstates every affected partner's net cashback. `defined()` already drops
+absent keys, so omitting is also what leaves an existing value alone on a
+re-sync. Same for `delivered_on`: absent means the maturation clock has not
+started, and guessing it from `ordered_on` would pay a month early.
 
 ### Two properties this route must never lose
 
@@ -138,10 +154,13 @@ reporting exists to prevent.
 ### An order arrives PENDING and counts towards nothing
 
 `referral_order.approval_status` defaults to `pending`. A Material Depot admin
-verifies each one in `/console/approvals`, and only an `approved` order is in
-the figure the reward ladder is computed from — `attributedSale()` in
-`lib/domain/rewards.ts` filters on it and is the only function allowed to total
-that money.
+verifies each one in `/console/approvals`, and only an `approved` order enters
+the incentive programme — `standing()` in `lib/domain/ledger.ts` is where that is
+decided, alongside the go-live cutoff and the 30-day maturation window.
+`docs/rewards.md` has the whole chain.
+
+A decline now needs an Appendix B **reason code**; `review_referral_order()`
+raises without one.
 
 Money is handed over on the strength of that number, so it gets a human. An order
 attributed to the wrong architect, or a duplicate, would otherwise have already
@@ -165,6 +184,12 @@ newest order with no explanation is one they assume is wrong.
 
 ### It also records tier unlocks
 
+> `reward_tier` / `reward_claim` are the record of coins Material Depot has
+> physically handed over. They are **not** the incentive programme — that is the
+> monthly and quarterly slab ladder in `lib/domain/slabs.ts`, derived from these
+> same orders at read time. `docs/rewards.md` has the split.
+
+
 `recordUnlockedTiers()` (`lib/data/unlock.ts`, shared with the console) recomputes
 each touched partner's **approved** total and inserts a `reward_claim` row for
 each threshold crossed. It never deletes a claim — a corrected order value that
@@ -184,6 +209,75 @@ congratulated the partner daily for a coin they got in July. The route now reads
 the existing claims first and reports only the difference. Verified against
 production on 2026-09-11: re-posting a seeded order returns `tiers_unlocked: []`
 and leaves the attributed total unchanged.
+
+## Consent, and what a partner is allowed to see — PRD §14.5
+
+A partner sees an end customer's store visits, cart contents and order values.
+That is legitimate, it is somebody else's personal data, and India's DPDP Act
+applies. Three rules, all in `lib/domain/privacy.ts`:
+
+**Consent has three states, not two.** `consent_given` is a NULLABLE boolean:
+null is "we have not asked", false is "they said no". Folding the first into the
+second throws away the only signal that would prompt anyone to ask — the same
+three-outcome rule as phone matching, one level up.
+
+Two separate columns, deliberately. `consent_claimed_at` is the partner ticking
+the box on the form. `consent_given` is Material Depot having confirmed it with
+the client directly, which §14.5 requires separately, and a trigger refuses a
+firm's own write to it. **A firm that could set it would be unlocking another
+person's purchase history by ticking a box about them.**
+
+**No consent → aggregate only.** Visited yes/no, ordered yes/no, an order value
+BAND. Not the timeline, not the cart, not the figure. Rendered as three plain
+facts rather than a blurred version of the real view: a blurred screen invites a
+partner to try to read through it, three sentences make clear the detail has not
+been agreed to rather than being withheld from them personally.
+
+**Phone numbers are masked, and a reveal is logged.** `98XXXXXX10`, first two
+and last two. `revealPhone()` writes the `phone_reveal` row **and then** returns
+the number — it is not sitting in the DOM behind a CSS blur. A firm can write to
+that log and cannot read it back: an audit record the audited party can read
+before deciding how to behave is not one.
+
+Searching the list by phone works on the full number even though the display is
+masked. An architect typing a number they already have is not a privacy event,
+and making them reveal first to find someone would be security theatre.
+
+## The referral form — PRD §9.2
+
+The duplicate check runs **before** submit, on blur of the phone field, and has
+four outcomes: `free`, `yours`, `taken`, `unknown`. The fourth is what makes it
+honest — if the lookup fails, the form says the check could not run and lets the
+partner submit. A check that silently reports "clear" when it did not run is
+worse than no check, because it is a promise.
+
+`taken` never says *who* holds the number. That is another firm's client list,
+which is why `referral_phone_taken()` in `005_studio.sql` answers exactly one
+bit.
+
+Consent is a **hard** gate, in the form and again in `createReferral()`.
+Everywhere else in Material Depot's apps a "mandatory" field is soft-gated and
+logged, because a blocked field stops real work in a store. This one is the
+lawful basis for showing one person's shopping to somebody else, and §14.5 names
+it a launch blocker for the journey view.
+
+## Reason codes — PRD Appendix B
+
+A rejection with no code is what §18 names as the cause of attribution disputes;
+"visible reason codes" is the stated mitigation. So:
+
+- The codes are CHECK constraints on `referral.rejection_reason` and
+  `referral_order.not_counted_reason`, not free text.
+- `review_referral()` and `review_referral_order()` **raise** if a decline
+  arrives without one.
+- `lib/domain/reasons.ts` holds one partner-facing sentence per code. Writing
+  that sentence at the call site is how six different phrasings of
+  ALREADY_ATTRIBUTED end up in the product and two firms comparing notes find
+  both.
+- `explain()` renders an unrecognised code as a readable sentence rather than as
+  nothing. The CRM can add a code without this repo being redeployed, and an
+  order shown as not counted with no explanation is the dispute the codes exist
+  to prevent.
 
 ## The referral record
 

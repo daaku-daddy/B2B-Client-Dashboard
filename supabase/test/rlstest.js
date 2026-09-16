@@ -151,6 +151,21 @@ async function asUser(c, uid, fn) {
     await c.query('rollback to savepoint sp')
   }
 
+  // A write the caller has no policy for does NOT raise — RLS filters the row
+  // out and the statement succeeds against nothing. So "refused" has two
+  // shapes, and a table whose only defence is a missing policy has to be
+  // checked on rows affected rather than on an exception.
+  async function unchanged(name, sql, params = []) {
+    await c.query('savepoint sp')
+    try {
+      const r = await c.query(sql, params)
+      check(name, r.rowCount === 0, `${r.rowCount} row(s) changed`)
+    } catch (e) {
+      check(name, e.code === '42501', e.code + ' ' + (e.message || '').slice(0, 60))
+    }
+    await c.query('rollback to savepoint sp')
+  }
+
   console.log('\n7. Staff see their market, and only their market')
   // By id, not by row count: the suite's own 'Rival Design Co' has no market,
   // and an unassigned firm is deliberately visible to everyone on the team
@@ -367,6 +382,202 @@ async function asUser(c, uid, fn) {
         (await count(forFirm[t][0], [TERRA])) === 0)
     }
   })
+
+  // ================================= 16. The Studio Sales Dashboard (PRD v1.1)
+
+  console.log('\n16. Escalations — a partner raises them, Material Depot moves them (§9.4)')
+  const REF_SHARMA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01'
+  const ORD_SHARMA = 'cccccccc-cccc-4ccc-8ccc-cccccccccc01'
+  const ESC = 'ee5ca1a7-0000-4000-8000-000000000001'
+
+  // Seeded outside any login, as the sync would: an open escalation against a
+  // delivered order is the thing that holds its maturation open (§10.5).
+  await c.query(
+    `insert into escalation (id, partner_id, referral_id, order_id, category, subject, description, status)
+     values ($1,$2,$3,$4,'delivery_delay','Two boxes short','Short delivery on the kitchen order.','resolved')
+     on conflict (id) do update set status = 'resolved'`,
+    [ESC, TERRA, REF_SHARMA, ORD_SHARMA])
+  // FIXED ids, for the reason the rival-client row above has one: `on conflict
+  // do nothing` with no target conflicts on nothing, so a re-run against a
+  // surviving cluster added a second copy of each comment and the counts below
+  // read as a leak. That is a harness artefact and it cost this suite a
+  // false failure once already.
+  await c.query(
+    `insert into escalation_comment (id, escalation_id, body, internal, author_side) values
+       ('ee5ca1a7-0000-4000-8000-0000000000c1',$1,'We are chasing the warehouse.',false,'md'),
+       ('ee5ca1a7-0000-4000-8000-0000000000c2',$1,'Firm has been late paying; do not offer a credit note.',true,'md')
+     on conflict (id) do nothing`, [ESC])
+
+  await asUser(c, DEMO_UID, async () => {
+    check('a firm reads its own escalation', (await count('select count(*)::int n from escalation')) > 0)
+    check('and the reply meant for it',
+      (await count('select count(*)::int n from escalation_comment where escalation_id = $1', [ESC])) === 1)
+    // The single most expensive leak this module could have: a KAM's private
+    // note about a firm, rendered to that firm. It is a POLICY and not a
+    // `where internal = false` in a query, because a query is one forgotten
+    // call away from being written without it.
+    check('and NOT the internal note about it',
+      (await count(`select count(*)::int n from escalation_comment where escalation_id = $1 and internal`, [ESC])) === 0)
+    check('a firm can raise one on its own client', await (async () => {
+      await c.query('savepoint e1')
+      try {
+        await c.query(`insert into escalation (partner_id, referral_id, category, subject, description)
+                       values ($1,$2,'quality_damage','Chipped tile','Two boxes chipped.')`, [TERRA, REF_SHARMA])
+        return true
+      } catch { return false } finally { await c.query('rollback to savepoint e1') }
+    })())
+  })
+
+  await asUser(c, DEMO_UID, async () => {
+    await blocked('a firm cannot raise one against ANOTHER firm',
+      `insert into escalation (partner_id, category, subject, description)
+       values ('0d0d0d0d-0000-4000-8000-000000000002','other','x','y')`)
+    // No UPDATE policy for a partner at all. A firm that could mark its own
+    // ticket resolved could release its own order's maturation.
+    //
+    // This one is asserted on the ROW COUNT and not on an exception, because a
+    // policy-less UPDATE does not raise: RLS filters the row out and Postgres
+    // cheerfully reports success against nothing. `blocked()` would have called
+    // that a pass in the other direction, which is how a missing policy gets
+    // shipped with a green suite.
+    await unchanged('a firm cannot resolve its own escalation',
+      `update escalation set status = 'closed' where id = $1`, [ESC])
+    await blocked('a firm cannot write an INTERNAL comment',
+      `insert into escalation_comment (escalation_id, body, internal, author_side)
+       values ($1,'sneaking this in',true,'partner')`, [ESC])
+    await blocked('a firm cannot move an escalation through the staff function',
+      `select set_escalation_status($1,'closed',null)`, [ESC])
+  })
+
+  await asUser(c, DEMO_UID, async () => {
+    check('a firm CAN reopen a resolved one, once (§9.4)', await (async () => {
+      await c.query('savepoint e2')
+      try { await c.query(`select reopen_escalation($1,'Still two boxes short.')`, [ESC]); return true }
+      catch { return false } finally { await c.query('rollback to savepoint e2') }
+    })())
+  })
+  await asUser(c, OTHER_UID, async () => {
+    await blocked('another firm cannot reopen it', `select reopen_escalation($1,'mine now')`, [ESC])
+  })
+  await asUser(c, KAM_BLR_UID, async () => {
+    check('the KAM for that market reads it', (await count('select count(*)::int n from escalation where id = $1', [ESC])) === 1)
+    check('and reads the internal note',
+      (await count('select count(*)::int n from escalation_comment where escalation_id = $1 and internal', [ESC])) === 1)
+  })
+  await asUser(c, KAM_HYD_UID, async () => {
+    check('a KAM in another market reads none of it',
+      (await count('select count(*)::int n from escalation where id = $1', [ESC])) === 0)
+    await blocked('and cannot move it', `select set_escalation_status($1,'closed',null)`, [ESC], 'P0001')
+  })
+
+  console.log('\n17. A firm does not decide its own referrals (§6.3, App. B)')
+  await asUser(c, DEMO_UID, async () => {
+    check('a firm can still correct a client name', await (async () => {
+      await c.query('savepoint r1')
+      try { await c.query(`update referral set client_name = 'Sharma (corrected)' where id = $1`, [REF_SHARMA]); return true }
+      catch { return false } finally { await c.query('rollback to savepoint r1') }
+    })())
+    await blocked('a firm cannot approve its own referral',
+      `update referral set status = 'approved' where id = $1`, [REF_SHARMA])
+    // Written as a CHANGE, not as a re-assertion of what is already there. The
+    // guard compares with `is distinct from`, so `set consent_given = true` on
+    // a row where it is already true changes nothing and is correctly allowed —
+    // and the first version of this test did exactly that and reported a leak.
+    await blocked('a firm cannot revoke its own client\'s consent record',
+      `update referral set consent_given = false where id = $1`, [REF_SHARMA])
+    await blocked('nor claim consent on a client who has not given it',
+      `update referral set consent_given = true where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa02'`)
+    await blocked('a firm cannot extend its own attribution window',
+      `update referral set attribution_expires_on = '2099-01-01' where id = $1`, [REF_SHARMA])
+    await blocked('a firm cannot change the phone its referral matches on',
+      `update referral set md_phone = '9000000000' where id = $1`, [REF_SHARMA])
+    await blocked('and cannot call the decision function', `select review_referral($1,'approved')`, [REF_SHARMA])
+  })
+  await asUser(c, KAM_BLR_UID, async () => {
+    await blocked('nor can a KAM — deciding a referral is an admin act',
+      `select review_referral($1,'approved')`, [REF_SHARMA])
+  })
+  await asUser(c, ADMIN_UID, async () => {
+    check('an admin can approve one', await (async () => {
+      await c.query('savepoint r2')
+      try { await c.query(`select review_referral($1,'approved',null,'Confirmed with the client.',true)`, [REF_SHARMA]); return true }
+      catch { return false } finally { await c.query('rollback to savepoint r2') }
+    })())
+    // Appendix B exists so a partner is never told "rejected" with no reason —
+    // §18 rates undocumented rejections as the cause of attribution disputes.
+    await blocked('a rejection with NO reason code is refused',
+      `select review_referral($1,'rejected')`, [REF_SHARMA], 'P0001')
+    check('a rejection WITH a reason code goes through', await (async () => {
+      await c.query('savepoint r3')
+      try { await c.query(`select review_referral($1,'rejected','ALREADY_ATTRIBUTED','Credited to another firm.')`, [REF_SHARMA]); return true }
+      catch { return false } finally { await c.query('rollback to savepoint r3') }
+    })())
+    await blocked('an invented reason code is refused by the CHECK constraint',
+      `select review_referral($1,'rejected','BECAUSE_I_SAID_SO')`, [REF_SHARMA], '23514')
+  })
+
+  console.log('\n18. The order gate still holds, and now needs a reason too')
+  await asUser(c, ADMIN_UID, async () => {
+    await blocked('declining an order with no reason code is refused',
+      `select review_referral_order($1,'rejected')`, [ORD_SHARMA], 'P0001')
+    check('declining WITH one records the code', await (async () => {
+      await c.query('savepoint o1')
+      try {
+        await c.query(`select review_referral_order($1,'rejected','dupe','DUPLICATE_ORDER')`, [ORD_SHARMA])
+        const n = await count(`select count(*)::int n from referral_order where id = $1 and not_counted_reason = 'DUPLICATE_ORDER'`, [ORD_SHARMA])
+        return n === 1
+      } catch { return false } finally { await c.query('rollback to savepoint o1') }
+    })())
+    check('approving clears the code rather than leaving a stale one', await (async () => {
+      await c.query('savepoint o2')
+      try {
+        await c.query(`select review_referral_order($1,'rejected','dupe','DUPLICATE_ORDER')`, [ORD_SHARMA])
+        await c.query(`select review_referral_order($1,'approved','checked')`, [ORD_SHARMA])
+        const n = await count(`select count(*)::int n from referral_order where id = $1 and not_counted_reason is null`, [ORD_SHARMA])
+        return n === 1
+      } catch { return false } finally { await c.query('rollback to savepoint o2') }
+    })())
+  })
+  await asUser(c, DEMO_UID, async () => {
+    await unchanged('a firm still cannot write its own coupon or discount',
+      `update referral_order set discount_availed = 0 where id = $1`, [ORD_SHARMA])
+    await unchanged('nor set its own delivery date, which is what maturation counts from',
+      `update referral_order set delivered_on = '2020-01-01' where id = $1`, [ORD_SHARMA])
+  })
+
+  console.log('\n19. The reveal log is written by the audited party, never read by them (§14.5)')
+  await asUser(c, DEMO_UID, async () => {
+    check('a firm can log a reveal', await (async () => {
+      await c.query('savepoint p1')
+      try {
+        await c.query(`insert into phone_reveal (partner_id, referral_id, surface) values ($1,$2,'client_list')`, [TERRA, REF_SHARMA])
+        return true
+      } catch { return false } finally { await c.query('rollback to savepoint p1') }
+    })())
+    // An audit record the audited party can read back is one they can check
+    // before deciding whether to behave; one they can delete is not a record.
+    check('and cannot read the log back', (await count('select count(*)::int n from phone_reveal')) === 0)
+    await blocked('nor log a reveal against another firm',
+      `insert into phone_reveal (partner_id, referral_id) values ('0d0d0d0d-0000-4000-8000-000000000002',$1)`, [REF_SHARMA])
+  })
+  await asUser(c, ADMIN_UID, async () => {
+    check('an admin can read it', (await count('select count(*)::int n from phone_reveal where partner_id = $1', [TERRA])) >= 0)
+  })
+
+  console.log('\n20. Notification preferences are the firm\'s own (§13.4)')
+  await asUser(c, DEMO_UID, async () => {
+    check('a firm can set its own', await (async () => {
+      await c.query('savepoint n1')
+      try {
+        await c.query(`insert into notification_pref (partner_id, prefs) values ($1,'{"rewards":{"whatsapp":false}}')
+                       on conflict (partner_id) do update set prefs = excluded.prefs`, [TERRA])
+        return true
+      } catch { return false } finally { await c.query('rollback to savepoint n1') }
+    })())
+    await blocked('and not another firm\'s',
+      `insert into notification_pref (partner_id, prefs) values ('0d0d0d0d-0000-4000-8000-000000000002','{}')`)
+  })
+
 
   console.log(`\n${pass} passed, ${fail} failed`)
   await c.end()

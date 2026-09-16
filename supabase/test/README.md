@@ -1,7 +1,7 @@
 # SQL tests
 
-Runs every file in `migrations/`, both files in `seed/`, and an RLS isolation
-suite against a **throwaway Postgres 18** that lives in `./data`. Nothing here touches the real Supabase
+Runs every file in `migrations/` (001–005), both files in `seed/`, and an RLS
+isolation suite against a **throwaway Postgres 18** that lives in `./data`. Nothing here touches the real Supabase
 project, and its dependencies are deliberately kept out of the app's
 `package.json` so building the site never downloads Postgres binaries.
 
@@ -36,7 +36,22 @@ exists` and inflated row counts, not as a clear error.
 
 ## What `rlstest.js` asserts
 
-132 checks, in fifteen groups:
+**169 checks, in twenty groups.** Groups 16–20 were added with `005_studio.sql`
+and cover escalations and their internal-note split, the referral decision guard
+and Appendix B's reason codes, the phone-reveal log, and notification
+preferences.
+
+Two helpers, and the difference matters:
+
+- `blocked()` expects an **exception** — a SECURITY DEFINER function raising
+  42501, or an INSERT failing its `with check`.
+- `unchanged()` expects **zero rows affected**. A write the caller has no policy
+  for does not raise: RLS filters the row out and Postgres reports success
+  against nothing. A table whose only defence is the *absence* of an UPDATE
+  policy has to be checked this way, and `blocked()` scores it as a pass in the
+  wrong direction.
+
+The original fifteen groups:
 
 1. The demo partner can read all thirteen of their own tables.
 2. **A second architect reads none of it.** This is the whole reason RLS is on

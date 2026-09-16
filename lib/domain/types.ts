@@ -36,6 +36,27 @@ export type Partner = {
   website: string | null
   instagram: string | null
   logo_url: string | null
+  // 005_studio.sql — PRD §13.1 and §13.3. Optional: see the note on Referral.
+  theme_preset?: string
+  theme_primary?: string | null
+  theme_accent?: string | null
+  theme_base?: 'light' | 'dark'
+  legal_name?: string | null
+  pan?: string | null
+  registered_address?: string | null
+  office_address?: string | null
+  /** §2.5 captures this now so pincode-based KAM assignment in Phase 2 is a
+   *  configuration change and not a rebuild. */
+  pincode?: string | null
+  operating_area?: string | null
+  linkedin?: string | null
+  established_year?: number | null
+  team_size?: string | null
+  services?: string[]
+  project_types?: string[]
+  budget_range?: string | null
+  /** §11.7's org-level opt-out of aggregated market-signal use */
+  market_signal_opt_in?: boolean
 }
 
 export type Client = {
@@ -211,6 +232,10 @@ export type FinanceEntry = {
   created_at: string
 }
 
+export type ReferralStatus =
+  | 'submitted' | 'under_review' | 'approved' | 'rejected' | 'duplicate'
+  | 'active' | 'dormant' | 'expired'
+
 export type Referral = {
   id: string
   partner_id: string
@@ -221,6 +246,32 @@ export type Referral = {
   referred_on: string
   notes: string | null
   created_at: string
+  // 005_studio.sql — PRD §9.2's form, and §14.5's consent basis.
+  //
+  // Every field below is OPTIONAL in TypeScript even though several are NOT
+  // NULL in Postgres. `queries.ts` reads `select('*')`, so on a deployment
+  // where 005 has not been pasted yet they arrive as `undefined`; typing them
+  // as required would compile and then read as `null` at runtime, which is the
+  // shape of the landmine in docs/landmines.md rather than a fix for it.
+  email?: string | null
+  city?: string | null
+  locality?: string | null
+  project_type?: 'residential' | 'commercial' | 'other' | null
+  budget_band?: string | null
+  timeline?: string | null
+  categories?: string[]
+  assigned_user?: string | null
+  /** the partner ticked the consent box on the form */
+  consent_claimed_at?: string | null
+  /** Material Depot confirmed it with the client. null = not asked yet. */
+  consent_given?: boolean | null
+  consent_at?: string | null
+  status?: ReferralStatus
+  rejection_reason?: string | null
+  reviewed_by?: string | null
+  reviewed_at?: string | null
+  review_note?: string | null
+  attribution_expires_on?: string | null
 }
 
 export type ReferralEventType =
@@ -262,6 +313,17 @@ export type ReferralOrder = {
   approved_at: string | null
   review_note: string | null
   synced_at: string
+  // 005_studio.sql. Optional for the same reason as on Referral above.
+  /** what the client actually paid at the till, as a code */
+  coupon_code?: string | null
+  /** rupees actually taken off. **null means UNKNOWN, never zero** — see
+   *  `discountOn()` in lib/domain/ledger.ts. */
+  discount_availed?: number | null
+  /** maturation counts 30 days from HERE, not from `ordered_on` */
+  delivered_on?: string | null
+  not_counted_reason?: string | null
+  /** placed on the partner firm's own GSTIN (§6.3.6) */
+  is_self?: boolean | null
 }
 
 export type RewardTier = {
@@ -393,6 +455,58 @@ export type PortfolioItem = {
   review_note: string | null
   sort_order: number
   created_at: string
+  updated_at: string
+}
+
+// -------------------------------------------------------------- escalations
+
+export type EscalationCategory =
+  | 'delivery_delay' | 'quality_damage' | 'wrong_item' | 'billing_gst' | 'other'
+
+export type EscalationStatus =
+  | 'open' | 'acknowledged' | 'in_progress' | 'resolved' | 'closed' | 'reopened'
+
+/** PRD §9.4. An OPEN one against an order holds that order's maturation, so
+ *  this table is read by the money path and not only by a support screen. */
+export type Escalation = {
+  id: string
+  partner_id: string
+  referral_id: string | null
+  order_id: string | null
+  category: EscalationCategory
+  subject: string
+  description: string
+  attachments: string[]
+  status: EscalationStatus
+  raised_by: string | null
+  raised_at: string
+  acknowledged_at: string | null
+  resolved_at: string | null
+  closed_at: string | null
+  ack_due_at: string
+  resolution_note: string | null
+  assigned_to: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type EscalationComment = {
+  id: string
+  escalation_id: string
+  body: string
+  /** RLS hides `true` from the partner. There is deliberately no filter for it
+   *  in any query — a filter is one forgotten call away from a leak. */
+  internal: boolean
+  author_id: string | null
+  author_side: 'partner' | 'md'
+  created_at: string
+}
+
+/** PRD §13.4. A missing row reads as "everything on": a firm that has never
+ *  opened Settings should still be told its cashback was confirmed. */
+export type NotificationPref = {
+  partner_id: string
+  prefs: Record<string, { in_app?: boolean; email?: boolean; whatsapp?: boolean }>
   updated_at: string
 }
 

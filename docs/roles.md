@@ -66,7 +66,7 @@ Three smaller decisions worth knowing:
 - **It is not an impersonation.** The page renders under the staff member's own
   session; no token is swapped and no write action exists on it, so a bug here
   cannot post anything as the firm.
-- **The numbers come from the partner's own functions** — `attributedSale()`,
+- **The numbers come from the partner's own functions** — `standing()`, `attributedSale()`,
   `pendingSale()`, `rewardStatus()` — never `partnerStanding()`. A support call
   is somebody reading a screen down the phone, and the figure the admin reads
   out has to be the figure the architect is looking at. Nothing from

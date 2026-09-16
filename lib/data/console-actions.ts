@@ -8,6 +8,7 @@ import { phone10 } from '@/lib/format'
 import { generatePassword } from '@/lib/auth/credentials'
 import { recordUnlockedTiers } from './unlock'
 import type { OrderApproval, PartnerApplication, PortfolioStatus, ProspectStage, StaffRole, TouchKind } from '@/lib/domain/types'
+import type { OrderNotCounted } from '@/lib/domain/reasons'
 
 /**
  * Every write the Material Depot console makes.
@@ -33,15 +34,36 @@ type Row = Record<string, unknown>
 
 // ==================================================== the order approval gate
 
-export async function reviewOrder(orderId: string, status: OrderApproval, note?: string | null) {
+/**
+ * PRD Appendix B: a DECLINED order needs a reason code, and the database now
+ * refuses one without it.
+ *
+ * The code is what the partner is shown — `standingSentence()` turns it into a
+ * sentence, one sentence per code, everywhere. §18 names undocumented rejections
+ * as the cause of attribution disputes and "visible reason codes" as the
+ * mitigation, so the free-text note is an ADDITION to the code rather than a
+ * replacement for it.
+ */
+export async function reviewOrder(
+  orderId: string,
+  status: OrderApproval,
+  note?: string | null,
+  reason?: OrderNotCounted | null,
+  isSelf?: boolean,
+) {
   const staff = await requireStaff(['admin'])
   if (!staff.ok) return staff
+  if (status === 'rejected' && !reason) {
+    return fail('Pick a reason for not counting this order — the partner is shown it, and "declined" on its own is what starts an argument.')
+  }
 
   const sb = await supabaseServer()
   const { data, error } = await sb.rpc('review_referral_order', {
     p_order_id: orderId,
     p_status: status,
     p_note: note?.trim() || null,
+    p_reason: reason ?? null,
+    p_self: isSelf ?? null,
   })
   if (error) return fail(`Could not save that decision: ${error.message}`)
 
@@ -92,7 +114,7 @@ export async function approveOrderAndNotify(
   summary: string,
   note?: string | null,
 ) {
-  const done = await reviewOrder(orderId, 'approved', note)
+  const done = await reviewOrder(orderId, 'approved', note, null)
   if (!done.ok) return done
 
   const logged = await logActivity({

@@ -16,8 +16,10 @@
   --color-ink-soft: #5b5147;
   --color-ink-faint: #8d8477;
 
-  --color-brand: #c4581c;
-  --color-brand-hover: #a94714;
+  /* 4.76:1 against white — AA for normal text. The previous #c4581c measured
+     4.41 and failed; see lib/domain/theme.ts. */
+  --color-brand: #bd5318;
+  --color-brand-hover: #9b4413;
   --color-brand-soft: #fbeee6;
   --color-brand-line: #f0d5c4;
 

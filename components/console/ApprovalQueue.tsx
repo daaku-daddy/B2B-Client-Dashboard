@@ -5,11 +5,14 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Check, ExternalLink, Globe, ShieldCheck, X } from 'lucide-react'
 import {
-  Badge, Button, Card, CardHead, Empty, Field, Problem, Table, Td, Textarea, Th,
+  Badge, Button, Card, CardHead, Empty, Field, Problem, Select, Table, Td, Textarea, Th,
 } from '@/components/ui'
 import { Modal } from '@/components/ui/Modal'
 import { approveOrderAndNotify, reviewOrder, reviewPortfolio } from '@/lib/data/console-actions'
 import type { OrderWithOwner, PortfolioWithFirm } from '@/lib/data/console-queries'
+import {
+  codeLabel, ORDER_NOT_COUNTED_CODES, PORTFOLIO_REJECTION_CODES, type OrderNotCounted,
+} from '@/lib/domain/reasons'
 import { date, inr } from '@/lib/format'
 import { marketLabel } from '@/lib/domain/markets'
 
@@ -62,14 +65,14 @@ export function ApprovalQueue({
     })
   }
 
-  function reject(note: string) {
+  function reject(note: string, code: string) {
     if (!rejecting) return
     const { kind, id } = rejecting
     run(
       () =>
         kind === 'orders'
-          ? reviewOrder(id, 'rejected', note)
-          : reviewPortfolio(id, 'rejected', note),
+          ? reviewOrder(id, 'rejected', note, code as OrderNotCounted)
+          : reviewPortfolio(id, 'rejected', `${codeLabel(code)}. ${note}`.trim()),
       () => setRejecting(null),
     )
   }
@@ -312,19 +315,34 @@ export function ApprovalQueue({
         hint={rejecting?.label}
       >
         <form
-          action={(form) => reject(String(form.get('note') ?? ''))}
+          action={(form) => reject(String(form.get('note') ?? ''), String(form.get('code') ?? 'OTHER'))}
           className="space-y-3"
         >
+          {/* PRD Appendix B. The code is picked from a list rather than typed,
+              because the partner is shown a sentence derived from it — and six
+              hand-typed phrasings of "already attributed" is what two firms
+              comparing notes would find. The database refuses a decline with no
+              code, so this cannot be skipped by a bug in this form. */}
           <Field
-            label="Why"
+            label="Reason"
             required
+            hint="The partner is shown a plain-language version of this against the order."
+          >
+            <Select name="code" defaultValue={rejecting?.kind === 'orders' ? 'CLIENT_NOT_ATTRIBUTED' : 'INCOMPLETE_DETAILS'} required>
+              {(rejecting?.kind === 'orders' ? ORDER_NOT_COUNTED_CODES : PORTFOLIO_REJECTION_CODES).map((c) => (
+                <option key={c} value={c}>{codeLabel(c)}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field
+            label="Anything to add"
             hint={
               rejecting?.kind === 'orders'
-                ? 'The partner sees that this one is not counting. Their KAM needs to be able to explain it.'
+                ? 'Optional, and shown to the partner after the reason. Their KAM needs to be able to explain it.'
                 : 'The partner sees this word for word, and it is what they act on.'
             }
           >
-            <Textarea name="note" rows={3} required />
+            <Textarea name="note" rows={3} />
           </Field>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setRejecting(null)}>Cancel</Button>
