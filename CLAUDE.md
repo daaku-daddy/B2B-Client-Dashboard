@@ -141,7 +141,7 @@ The incentive programme goes further: slab, cashback, gift, maturation and the
 whole statement are computed from `referral_order` on every read. Nothing about
 money is stored except the orders themselves and an admin's decision on each one.
 
-### 4b. An unknown is not a zero, and it is not a no
+### 5. An unknown is not a zero, and it is not a no
 
 Three places this rule decides money or privacy, and all three carry the third
 state rather than collapsing it:
@@ -154,14 +154,14 @@ state rather than collapsing it:
 Collapsing any of them compiles, reads fine, and is wrong in the direction that
 costs somebody money or exposes somebody's shopping.
 
-### 5. A write must not destroy what it was not told about
+### 6. A write must not destroy what it was not told about
 
 An upsert writes every column in its payload, so building a row with
 `store: o.store ?? null` blanks the store on every re-sync that omits it.
 Payload-shaped writes go through a `defined()` filter that drops `undefined`
 keys; an explicit `null` still clears. This one shipped — `docs/landmines.md`.
 
-### 6. Material Depot staff see the relationship, never the work
+### 7. Material Depot staff see the relationship, never the work
 
 No policy anywhere lets staff read `client`, `project`, `project_area`, `board`,
 `board_item`, `quote`, `quote_line`, `procurement_item` or `finance_entry`. A
@@ -172,7 +172,7 @@ That is the only reason a designer would put their pricing in a supplier's
 portal, and a "just for support" read policy on any one of those tables would
 throw it away. `supabase/test/rlstest.js` group 8 checks all nine by name.
 
-### 7. The money gate lives in the database
+### 8. The money gate lives in the database
 
 Only an `approved` order counts towards a partner's rewards, and
 `referral_order` has **no UPDATE policy for anybody**. The single thing that can
@@ -228,6 +228,16 @@ Environment variables live in the Vercel project, not here. All four are set on
 **Preview is still missing the two `NEXT_PUBLIC_*` ones** — `vercel env add …
 preview` loops on `git_branch_required` whichever documented form you use, so
 they need adding in the dashboard.
+
+Four more are **optional and unset**, and the app is correct without them:
+
+| Variable | Used by | Unset behaviour |
+|---|---|---|
+| `NEXT_PUBLIC_B2B_DESK_PHONE` / `_EMAIL` / `_HOURS` | `KamCard`'s fallback when a firm has no KAM assigned (§13.5) | The card says any store can help, rather than printing a desk number. **Deliberate** — an invented number in a live partner app means a partner rings a stranger and concludes the whole product is fake. Set these when the desk exists. |
+| `NEXT_PUBLIC_APP_VERSION` | `app_version` on every analytics event (§14.6.3) | `'dev'`. Harmless until a vendor is connected, at which point every event from production would be stamped `dev`. |
+
+There is **no Mixpanel token and no Clarity id**, on purpose — `docs/analytics.md`
+has why, and what adding one costs (one function, one file).
 
 An env var only reaches a NEW deployment, so `vercel --prod` after changing one.
 `/api/sync/referrals` returns 503 naming the missing variable rather than
